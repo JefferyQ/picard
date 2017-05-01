@@ -31,8 +31,8 @@ import org.testng.annotations.BeforeTest;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 import picard.cmdline.CommandLineProgramTest;
+import picard.illumina.parser.BaseIlluminaDataProvider;
 import picard.illumina.parser.ClusterData;
-import picard.illumina.parser.IlluminaDataProvider;
 import picard.illumina.parser.IlluminaDataProviderFactory;
 import picard.illumina.parser.IlluminaDataType;
 import picard.illumina.parser.ReadStructure;
@@ -295,7 +295,7 @@ public class ExtractIlluminaBarcodesTest extends CommandLineProgramTest {
 
         int numReads = 0;
 
-        final IlluminaDataProvider dataProvider = factory.makeDataProvider();
+        final BaseIlluminaDataProvider dataProvider = factory.makeDataProvider();
         while (dataProvider.hasNext()) {
             final ClusterData cluster = dataProvider.next();
 

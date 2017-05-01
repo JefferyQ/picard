@@ -183,6 +183,21 @@ public class IlluminaDataProviderFactory {
         outputMapping = new OutputMapping(readStructure);
     }
 
+    public IlluminaDataProviderFactory(File basecallDirectory, File barcodesDirectory, int lane,
+                                       ReadStructure readStructure,
+                                       BclQualityEvaluationStrategy bclQualityEvaluationStrategy) {
+        this.basecallDirectory = basecallDirectory;
+        this.barcodesDirectory = barcodesDirectory;
+        this.bclQualityEvaluationStrategy = bclQualityEvaluationStrategy;
+
+        this.lane = lane;
+
+        this.formatToDataTypes = null;
+        this.availableTiles = null;
+        this.fileUtil = null;
+        outputMapping = new OutputMapping(readStructure);
+    }
+
     /**
      * Sometimes (in the case of skipped reads) the logical read structure of the output cluster data is different from the input
      * readStructure
@@ -212,7 +227,7 @@ public class IlluminaDataProviderFactory {
      *
      * @return An iterator for reading the Illumina basecall output for the lane specified in the ctor.
      */
-    public IlluminaDataProvider makeDataProvider() {
+    public BaseIlluminaDataProvider makeDataProvider() {
         return makeDataProvider(null);
     }
 
@@ -221,7 +236,7 @@ public class IlluminaDataProviderFactory {
      *
      * @return An iterator for reading the Illumina basecall output for the lane specified in the constructor.
      */
-    public IlluminaDataProvider makeDataProvider(List<Integer> requestedTiles) {
+    public BaseIlluminaDataProvider makeDataProvider(List<Integer> requestedTiles) {
         if (requestedTiles == null) {
             requestedTiles = availableTiles;
         } else {
@@ -386,5 +401,9 @@ public class IlluminaDataProviderFactory {
         }
 
         return parser;
+    }
+
+    public BaseIlluminaDataProvider makeDataProvider(boolean useNewDataProvider) {
+        return new NewIlluminaDataProvider();
     }
 }

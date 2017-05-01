@@ -32,10 +32,10 @@ import htsjdk.samtools.util.StringUtil;
 import picard.cmdline.CommandLineProgram;
 import picard.cmdline.CommandLineProgramProperties;
 import picard.cmdline.Option;
-import picard.cmdline.programgroups.Illumina;
 import picard.cmdline.StandardOptionDefinitions;
+import picard.cmdline.programgroups.Illumina;
+import picard.illumina.parser.BaseIlluminaDataProvider;
 import picard.illumina.parser.ClusterData;
-import picard.illumina.parser.IlluminaDataProvider;
 import picard.illumina.parser.IlluminaDataProviderFactory;
 import picard.illumina.parser.IlluminaDataType;
 import picard.illumina.parser.ReadDescriptor;
@@ -554,7 +554,7 @@ public class ExtractIlluminaBarcodes extends CommandLineProgram {
         private final BarcodeMetric noMatch;
         private Exception exception = null;
         private final boolean usingQualityScores;
-        private final IlluminaDataProvider provider;
+        private final BaseIlluminaDataProvider provider;
         private final ReadStructure outputReadStructure;
         private final int maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality;
 

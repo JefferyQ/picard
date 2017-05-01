@@ -46,6 +46,7 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
     private static final File TEST_DATA_DIR = new File("testdata/picard/illumina/25T8B25T/fastq");
     private static final File TEST_DATA_DIR_WITH_4M = new File("testdata/picard/illumina/25T8B25T/fastq_with_4M");
     private static final File TEST_DATA_DIR_WITH_4M4M = new File("testdata/picard/illumina/25T8B25T/fastq_with_4M4M");
+    private static final File TEST_DATA_DIR_WITH_CBCLS = new File("/Users/jcarey/workspace/data/seq/illumina/proc/SL-NVA/170322_A00113_0017_AH23GVDMXX/Data/Intensities/BaseCalls");
 
     private static final File DUAL_TEST_DATA_DIR = new File("testdata/picard/illumina/25T8B8B25T/fastq");
 
@@ -130,6 +131,73 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
     @Test
     public void testDualBarcodes() throws Exception {
         runStandardTest(1, "dualBarcode.", "barcode_double.params", 2, "25T8B8B25T", DUAL_BASECALLS_DIR, DUAL_TEST_DATA_DIR);
+    }
+
+    @Test
+    public void testCbclConvert() throws Exception {
+        runNewConverterTest(1, "dualBarcode.", "barcode_double.params", 2, "151T8B8B151T", TEST_DATA_DIR_WITH_CBCLS, DUAL_TEST_DATA_DIR);
+    }
+
+    private void runNewConverterTest(final int lane, final String jobName, final String libraryParamsFile,
+                                     final int concatNColumnFields, final String readStructureString, final File baseCallsDir,
+                                     final File testDataDir) throws Exception {
+        final File outputDir = File.createTempFile(jobName, ".dir");
+        try {
+            outputDir.delete();
+            outputDir.mkdir();
+
+            outputDir.deleteOnExit();
+            // Create barcode.params with output files in the temp directory
+            final File libraryParams = new File(outputDir, libraryParamsFile);
+            libraryParams.deleteOnExit();
+            final List<File> outputPrefixes = new ArrayList<File>();
+            final LineReader reader = new BufferedLineReader(new FileInputStream(new File(testDataDir, libraryParamsFile)));
+            final PrintWriter writer = new PrintWriter(libraryParams);
+            final String header = reader.readLine();
+            writer.println(header + "\tOUTPUT_PREFIX");
+            while (true) {
+                final String line = reader.readLine();
+                if (line == null) {
+                    break;
+                }
+                final String[] fields = line.split("\t");
+                final File outputPrefix = new File(outputDir, StringUtil.join("", Arrays.copyOfRange(fields, 0, concatNColumnFields)));
+                outputPrefixes.add(outputPrefix);
+                writer.println(line + "\t" + outputPrefix);
+            }
+            writer.close();
+            reader.close();
+
+            runPicardCommandLine(new String[]{
+                    "BASECALLS_DIR=" + baseCallsDir,
+                    "LANE=" + lane,
+                    "RUN_BARCODE=HiMom",
+                    "READ_STRUCTURE=" + readStructureString,
+                    "MULTIPLEX_PARAMS=" + libraryParams,
+                    "MACHINE_NAME=machine1",
+                    "FLOWCELL_BARCODE=abcdeACXX",
+                    "MAX_READS_IN_RAM_PER_TILE=100",
+                    "USE_NEW_CONVERTER=true"//force spill to disk to test encode/decode
+            });
+
+            final ReadStructure readStructure = new ReadStructure(readStructureString);
+            for (final File outputSam : outputPrefixes) {
+                for (int i = 1; i <= readStructure.templates.length(); ++i) {
+                    final String filename = outputSam.getName() + "." + i + ".fastq";
+                    IOUtil.assertFilesEqual(new File(outputSam.getParentFile(), filename), new File(testDataDir, filename));
+                }
+                for (int i = 1; i <= readStructure.sampleBarcodes.length(); ++i) {
+                    final String filename = outputSam.getName() + ".barcode_" + i + ".fastq";
+                    IOUtil.assertFilesEqual(new File(outputSam.getParentFile(), filename), new File(testDataDir, filename));
+                }
+                for (int i = 1; i <= readStructure.molecularBarcode.length(); ++i) {
+                    final String filename = outputSam.getName() + ".index_" + i + ".fastq";
+                    IOUtil.assertFilesEqual(new File(outputSam.getParentFile(), filename), new File(testDataDir, filename));
+                }
+            }
+        } finally {
+            TestUtil.recursiveDelete(outputDir);
+        }
     }
 
     /**

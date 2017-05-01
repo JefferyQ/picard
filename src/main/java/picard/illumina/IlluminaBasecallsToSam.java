@@ -41,8 +41,8 @@ import picard.PicardException;
 import picard.cmdline.CommandLineProgram;
 import picard.cmdline.CommandLineProgramProperties;
 import picard.cmdline.Option;
-import picard.cmdline.programgroups.Illumina;
 import picard.cmdline.StandardOptionDefinitions;
+import picard.cmdline.programgroups.Illumina;
 import picard.illumina.parser.ReadStructure;
 import picard.illumina.parser.readers.BclQualityEvaluationStrategy;
 import picard.util.AdapterPair;
@@ -517,7 +517,7 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
     }
 
     private static final class SAMFileWriterWrapper
-            implements IlluminaBasecallsConverter.ConvertedClusterDataWriter<SAMRecordsForCluster> {
+            implements BasecallsConverter.ConvertedClusterDataWriter<SAMRecordsForCluster> {
         public final SAMFileWriter writer;
 
         private SAMFileWriterWrapper(final SAMFileWriter writer) {

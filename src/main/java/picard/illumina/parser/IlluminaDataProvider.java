@@ -39,7 +39,7 @@ import java.util.Set;
  *
  * @author jburke@broadinstitute.org
  */
-public class IlluminaDataProvider implements Iterator<ClusterData>, Iterable<ClusterData> {
+public class IlluminaDataProvider implements BaseIlluminaDataProvider {
 
     /** contains QSeqs, bcls, or other Illumina file types that will be parsed by this class */
     private final File basecallDirectory; //These two are for error reporting only
@@ -211,6 +211,7 @@ public class IlluminaDataProvider implements Iterator<ClusterData>, Iterable<Clu
     }
 
     /** Jump so that the next record returned will be from the specified tile. */
+    @Override
     public void seekToTile(final int oneBasedTileNumber) {
         for (final IlluminaParser parser : parsers) {
             parser.seekToTile(oneBasedTileNumber);
@@ -222,6 +223,7 @@ public class IlluminaDataProvider implements Iterator<ClusterData>, Iterable<Clu
         return this;
     }
 
+    @Override
     public void close() {
         for (final IlluminaParser parser : parsers) {
             parser.close();
