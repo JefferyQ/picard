@@ -27,7 +27,9 @@ package picard.illumina.parser;
 import htsjdk.samtools.util.Log;
 import htsjdk.samtools.util.StringUtil;
 import picard.PicardException;
+import picard.illumina.BarcodeMetric;
 import picard.illumina.parser.IlluminaFileUtil.SupportedIlluminaFormat;
+import picard.illumina.parser.readers.AbstractIlluminaPositionFileReader;
 import picard.illumina.parser.readers.BclQualityEvaluationStrategy;
 
 import java.io.File;
@@ -88,7 +90,9 @@ public class IlluminaDataProviderFactory {
     }
 
     // The following properties must be specified by caller.
-    /** basecallDirectory holds QSeqs or bcls * */
+    /**
+     * basecallDirectory holds QSeqs or bcls *
+     */
     private final File basecallDirectory;
     private final File barcodesDirectory;
     private final int lane;
@@ -103,7 +107,9 @@ public class IlluminaDataProviderFactory {
      */
     protected final Map<SupportedIlluminaFormat, Set<IlluminaDataType>> formatToDataTypes;
 
-    /** Basecall Directory/lane parameterized util for finding IlluminaFiles */
+    /**
+     * Basecall Directory/lane parameterized util for finding IlluminaFiles
+     */
     private final IlluminaFileUtil fileUtil;
 
 
@@ -113,25 +119,25 @@ public class IlluminaDataProviderFactory {
     private final BclQualityEvaluationStrategy bclQualityEvaluationStrategy;
 
     /**
-	 * Create factory with the specified options, one that favors using QSeqs over all other files
-	 *
-	 * @param basecallDirectory The baseCalls directory of a complete Illumina directory.  Files are found by searching relative to this folder (some of them higher up in the directory tree).
-	 * @param lane              Which lane to iterate over.
-	 * @param readStructure     The read structure to which output clusters will conform.  When not using QSeqs, EAMSS masking(see BclParser) is run on individual reads as found in the readStructure, if
-	 *                          the readStructure specified does not match the readStructure implied by the sequencer's output than the quality scores output may differ than what would be found
-	 *                          in a run's QSeq files
-	 * @param dataTypesArg      Which data types to read
-	 */
-	public IlluminaDataProviderFactory(final File basecallDirectory, final int lane, final ReadStructure readStructure,
-	                                   final BclQualityEvaluationStrategy bclQualityEvaluationStrategy,
-	                                   final IlluminaDataType... dataTypesArg) {
-										this(basecallDirectory, null,
-												lane, readStructure,
-												bclQualityEvaluationStrategy,
-												dataTypesArg);
-									}
+     * Create factory with the specified options, one that favors using QSeqs over all other files
+     *
+     * @param basecallDirectory The baseCalls directory of a complete Illumina directory.  Files are found by searching relative to this folder (some of them higher up in the directory tree).
+     * @param lane              Which lane to iterate over.
+     * @param readStructure     The read structure to which output clusters will conform.  When not using QSeqs, EAMSS masking(see BclParser) is run on individual reads as found in the readStructure, if
+     *                          the readStructure specified does not match the readStructure implied by the sequencer's output than the quality scores output may differ than what would be found
+     *                          in a run's QSeq files
+     * @param dataTypesArg      Which data types to read
+     */
+    public IlluminaDataProviderFactory(final File basecallDirectory, final int lane, final ReadStructure readStructure,
+                                       final BclQualityEvaluationStrategy bclQualityEvaluationStrategy,
+                                       final IlluminaDataType... dataTypesArg) {
+        this(basecallDirectory, null,
+                lane, readStructure,
+                bclQualityEvaluationStrategy,
+                dataTypesArg);
+    }
 
-	/**
+    /**
      * Create factory with the specified options, one that favors using QSeqs over all other files
      *
      * @param basecallDirectory The baseCalls directory of a complete Illumina directory.  Files are found by searching relative to this folder (some of them higher up in the directory tree).
@@ -217,7 +223,9 @@ public class IlluminaDataProviderFactory {
         return availableTiles;
     }
 
-    /** Sets whether or not EAMSS filtering will be applied if parsing BCL files for bases and quality scores. */
+    /**
+     * Sets whether or not EAMSS filtering will be applied if parsing BCL files for bases and quality scores.
+     */
     public void setApplyEamssFiltering(final boolean applyEamssFiltering) {
         this.applyEamssFiltering = applyEamssFiltering;
     }
@@ -225,8 +233,19 @@ public class IlluminaDataProviderFactory {
     /**
      * Call this method to create a ClusterData iterator over all clusters for all tiles in ascending numeric order.
      *
+     * @param cbcls
+     * @param locsFile
+     * @param filterFiles
+     * @param barcodesMetrics
      * @return An iterator for reading the Illumina basecall output for the lane specified in the ctor.
      */
+    public BaseIlluminaDataProvider makeDataProvider(List<File> cbcls,
+                                                     List<AbstractIlluminaPositionFileReader.PositionInfo> locsFile,
+                                                     File[] filterFiles, Map<String, BarcodeMetric> barcodesMetrics) {
+        return new NewIlluminaDataProvider(cbcls, locsFile, filterFiles, lane, outputMapping,
+                false, barcodesMetrics);
+    }
+
     public BaseIlluminaDataProvider makeDataProvider() {
         return makeDataProvider(null);
     }
@@ -356,11 +375,11 @@ public class IlluminaDataProviderFactory {
         final IlluminaParser parser;
         switch (format) {
             case Barcode:
-                parser = new BarcodeParser(((PerTileFileUtil)fileUtil.getUtil(SupportedIlluminaFormat.Barcode)).getFiles(requestedTiles));
+                parser = new BarcodeParser(((PerTileFileUtil) fileUtil.getUtil(SupportedIlluminaFormat.Barcode)).getFiles(requestedTiles));
                 break;
 
             case Bcl: {
-                final CycleIlluminaFileMap bclFileMap = ((PerTilePerCycleFileUtil)fileUtil.getUtil(SupportedIlluminaFormat.Bcl))
+                final CycleIlluminaFileMap bclFileMap = ((PerTilePerCycleFileUtil) fileUtil.getUtil(SupportedIlluminaFormat.Bcl))
                         .getFiles(requestedTiles, outputMapping.getOutputCycles());
                 bclFileMap.assertValid(requestedTiles, outputMapping.getOutputCycles());
                 parser = new BclParser(basecallDirectory, lane, bclFileMap, outputMapping, this.applyEamssFiltering, bclQualityEvaluationStrategy);
@@ -368,7 +387,7 @@ public class IlluminaDataProviderFactory {
             }
 
             case Filter:
-                final IlluminaFileMap filterFileMap = ((PerTileFileUtil)fileUtil.getUtil(SupportedIlluminaFormat.Filter)).getFiles(requestedTiles);
+                final IlluminaFileMap filterFileMap = ((PerTileFileUtil) fileUtil.getUtil(SupportedIlluminaFormat.Filter)).getFiles(requestedTiles);
                 parser = new FilterParser(filterFileMap);
                 break;
 
@@ -380,11 +399,11 @@ public class IlluminaDataProviderFactory {
                 break;
 
             case MultiTileFilter:
-                parser = ((MultiTileFilterFileUtil)fileUtil.getUtil(SupportedIlluminaFormat.MultiTileFilter)).makeParser(requestedTiles);
+                parser = ((MultiTileFilterFileUtil) fileUtil.getUtil(SupportedIlluminaFormat.MultiTileFilter)).makeParser(requestedTiles);
                 break;
 
             case MultiTileLocs:
-                parser = ((MultiTileLocsFileUtil)fileUtil.getUtil(SupportedIlluminaFormat.MultiTileLocs)).makeParser(requestedTiles);
+                parser = ((MultiTileLocsFileUtil) fileUtil.getUtil(SupportedIlluminaFormat.MultiTileLocs)).makeParser(requestedTiles);
                 break;
 
             case MultiTileBcl: {
@@ -401,9 +420,5 @@ public class IlluminaDataProviderFactory {
         }
 
         return parser;
-    }
-
-    public BaseIlluminaDataProvider makeDataProvider(boolean useNewDataProvider) {
-        return new NewIlluminaDataProvider();
     }
 }

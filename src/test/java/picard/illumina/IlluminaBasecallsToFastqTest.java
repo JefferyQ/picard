@@ -46,9 +46,10 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
     private static final File TEST_DATA_DIR = new File("testdata/picard/illumina/25T8B25T/fastq");
     private static final File TEST_DATA_DIR_WITH_4M = new File("testdata/picard/illumina/25T8B25T/fastq_with_4M");
     private static final File TEST_DATA_DIR_WITH_4M4M = new File("testdata/picard/illumina/25T8B25T/fastq_with_4M4M");
-    private static final File TEST_DATA_DIR_WITH_CBCLS = new File("/Users/jcarey/workspace/data/seq/illumina/proc/SL-NVA/170322_A00113_0017_AH23GVDMXX/Data/Intensities/BaseCalls");
+    private static final File TEST_DATA_DIR_WITH_CBCLS = new File("testdata/picard/illumina/125T8B8B125T_cbcl/Data/Intensities/BaseCalls");
 
     private static final File DUAL_TEST_DATA_DIR = new File("testdata/picard/illumina/25T8B8B25T/fastq");
+    private static final File DUAL_CBCL_TEST_DATA_DIR = new File("testdata/picard/illumina/125T8B8B125T_cbcl/fastq");
 
     public String getCommandLineProgramName() {
         return IlluminaBasecallsToFastq.class.getSimpleName();
@@ -101,8 +102,8 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
             });
 
             final String[] filenames = new String[]{
-                filePrefix + ".1.fastq",
-                filePrefix + ".barcode_1.fastq"
+                    filePrefix + ".1.fastq",
+                    filePrefix + ".barcode_1.fastq"
             };
             for (final String filename : filenames) {
                 IOUtil.assertFilesEqual(new File(outputDir, filename), new File(TEST_DATA_DIR, filename));
@@ -135,7 +136,7 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
 
     @Test
     public void testCbclConvert() throws Exception {
-        runNewConverterTest(1, "dualBarcode.", "barcode_double.params", 2, "151T8B8B151T", TEST_DATA_DIR_WITH_CBCLS, DUAL_TEST_DATA_DIR);
+        runNewConverterTest(1, "dualBarcode.", "barcode_double.params", 2, "151T8B8B151T", TEST_DATA_DIR_WITH_CBCLS, DUAL_CBCL_TEST_DATA_DIR);
     }
 
     private void runNewConverterTest(final int lane, final String jobName, final String libraryParamsFile,
@@ -176,8 +177,7 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
                     "MULTIPLEX_PARAMS=" + libraryParams,
                     "MACHINE_NAME=machine1",
                     "FLOWCELL_BARCODE=abcdeACXX",
-                    "MAX_READS_IN_RAM_PER_TILE=100",
-                    "USE_NEW_CONVERTER=true"//force spill to disk to test encode/decode
+                    "USE_NEW_CONVERTER=true"
             });
 
             final ReadStructure readStructure = new ReadStructure(readStructureString);
@@ -204,14 +204,13 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
      * This test utility takes a libraryParamsFile and generates output sam files through IlluminaBasecallsToFastq to compare against
      * preloaded test data
      *
-     * @param lane lane number to use
-     * @param jobName name of job for the temp file
-     * @param libraryParamsFile the params file to use for the de-multiplexing
+     * @param lane                lane number to use
+     * @param jobName             name of job for the temp file
+     * @param libraryParamsFile   the params file to use for the de-multiplexing
      * @param concatNColumnFields how many columns to concatenate to get the barcode
      * @param readStructureString what read-structure string to use
-     * @param baseCallsDir what directory can I find the BCLs in
-     * @param testDataDir what directory can I find the expected resulting files
-     *
+     * @param baseCallsDir        what directory can I find the BCLs in
+     * @param testDataDir         what directory can I find the expected resulting files
      * @throws Exception
      */
 

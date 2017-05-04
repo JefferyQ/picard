@@ -2,10 +2,8 @@ package picard.illumina.parser.readers;
 
 import htsjdk.samtools.util.CloseableIterator;
 import htsjdk.samtools.util.CloserUtil;
-import htsjdk.samtools.util.Log;
-import htsjdk.samtools.util.ProgressLogger;
 import htsjdk.samtools.util.RuntimeIOException;
-import picard.illumina.parser.BclData;
+import picard.illumina.parser.CbclData;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -14,6 +12,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,31 +56,26 @@ import java.util.zip.GZIPInputStream;
  * higher 4 bits are the second cluster.
  **/
 
-public class CbclReader extends BaseBclReader implements CloseableIterator<BclData> {
-
-    private static Log log = Log.getInstance(CbclReader.class);
+public class CbclReader extends BaseBclReader implements CloseableIterator<CbclData> {
 
     private ByteBuffer[] cachedTile;
 
     private int[] currentTile;
 
-    private List<BclData> queue = new ArrayList<>();
+    private List<CbclData> queue = new ArrayList<>();
 
     private final CycleData[] cycleData;
-    private Map<Integer, File> filters;
+    private Map<Integer, File> filterFileMap;
     private Map<Integer, boolean[]> cachedFilter = new HashMap<>();
-
-    void addFilters(Map<Integer, File> filters) {
-        this.filters = filters;
-    }
 
     private static final int INITIAL_HEADER_SIZE = 6;
 
-    public CbclReader(final List<File> cbcls, final int[] outputLengths) {
+    public CbclReader(final List<File> cbcls, final Map<Integer, File> filterFileMap, final int[] outputLengths) {
         super(outputLengths);
         cycleData = new CycleData[cycles];
         cachedTile = new ByteBuffer[cycles];
         currentTile = new int[cycles];
+        this.filterFileMap = filterFileMap;
 
         try {
             final ByteBuffer byteBuffer = ByteBuffer.allocate(INITIAL_HEADER_SIZE);
@@ -161,12 +155,12 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<BclDa
         return !queue.isEmpty();
     }
 
-    public BclData next() {
+    public CbclData next() {
         if (queue.isEmpty()) {
             advance();
         }
 
-        final BclData data = queue.get(0);
+        final CbclData data = queue.get(0);
         queue.remove(0);
         return data;
     }
@@ -180,7 +174,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<BclDa
 
     private void advance() {
         int totalCycleCount = 0;
-        BclData data = new BclData(outputLengths);
+        CbclData data = new CbclData(outputLengths, cycleData[totalCycleCount].tileInfo[currentTile[totalCycleCount]].tileNum);
 
         for (int read = 0; read < outputLengths.length; read++) {
             for (int cycle = 0; cycle < outputLengths[read]; cycle++) {
@@ -230,7 +224,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<BclDa
 
     private void cacheFilter(TileData currentTileData) {
         boolean[] filterValues = new boolean[currentTileData.numClustersInTile];
-        FilterFileReader reader = new FilterFileReader(filters.get(currentTileData.tileNum));
+        FilterFileReader reader = new FilterFileReader(filterFileMap.get(currentTileData.tileNum));
         int count = 0;
         while (reader.hasNext()) {
             filterValues[count] = reader.next();
@@ -257,13 +251,13 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<BclDa
         }
 
         // Uncompress the data from the buffer we just wrote - use gzip input stream to write to uncompressed buffer
-        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(tileByteBuffer.array());
+        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(Arrays.copyOfRange(tileByteBuffer.array(), 0, readBytes));
         if (cachedTile[totalCycleCount] != null) {
             //clear the old cache
             cachedTile[totalCycleCount] = null;
         }
         GZIPInputStream gzipInputStream = new GZIPInputStream(byteInputStream, uncompressedByteBuffer.capacity());
-        int read = 0;
+        int read;
         int totalRead = 0;
         while ((read = gzipInputStream.read(tempUncompressedByteBuffer.array(), 0, tempUncompressedByteBuffer.capacity())) != -1) {
             uncompressedByteBuffer.put(tempUncompressedByteBuffer.array(), 0, read);
@@ -288,10 +282,10 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<BclDa
         //if nonPF reads are included we need to strip them out
         if (!currentCycleData.pfExcluded) {
             ByteBuffer uncompressedFilteredByteBuffer = ByteBuffer.allocate(tileData.uncompressedBlockSize * 2);
-            FilterFileReader reader = new FilterFileReader(filters.get(tileData.tileNum));
-            while (reader.hasNext()) {
+            boolean[] filterDatas = cachedFilter.get(tileData.tileNum);
+            for (boolean filterData : filterDatas) {
                 byte readByte = unNibbledByteBuffer.get();
-                if (reader.next()) {
+                if (filterData) {
                     uncompressedFilteredByteBuffer.put(readByte);
                 }
             }
@@ -301,5 +295,4 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<BclDa
             cachedTile[totalCycleCount] = unNibbledByteBuffer;
         }
     }
-
 }

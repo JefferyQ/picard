@@ -11,7 +11,9 @@ import picard.illumina.parser.IlluminaDataProviderFactory;
 import picard.illumina.parser.IlluminaFileUtil;
 import picard.illumina.parser.ParameterizedFileUtil;
 import picard.illumina.parser.ReadStructure;
+import picard.illumina.parser.readers.AbstractIlluminaPositionFileReader;
 import picard.illumina.parser.readers.BclQualityEvaluationStrategy;
+import picard.illumina.parser.readers.LocsFileReader;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -24,10 +26,14 @@ import java.util.regex.Pattern;
 
 public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends BasecallsConverter<CLUSTER_OUTPUT_RECORD> {
     private static final Log log = Log.getInstance(NewIlluminaBasecallsConverter.class);
+    private final Map<String, BarcodeMetric> barcodesMetrics = new HashMap<>();
     Map<Integer, File> filterFileMap = new HashMap<>();
 
     final private Map<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> barcodeToRecordCollection =
             new HashMap<>();
+    private final List<File> cbcls;
+    private final List<AbstractIlluminaPositionFileReader.PositionInfo> locs = new ArrayList<>();
+    private final File[] filterFiles;
 
     /**
      * @param basecallsDir             Where to read basecalls from.
@@ -48,11 +54,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
      * @param outputRecordClass        Inconveniently needed to create SortingCollections.
      * @param includeNonPfReads        If true, will include ALL reads (including those which do not have PF set)
      * @param ignoreUnexpectedBarcodes If true, will ignore reads whose called barcode is not found in barcodeRecordWriterMap,
-     *                                 otherwise will throw an exception
      */
     public NewIlluminaBasecallsConverter(final File basecallsDir, File barcodesDir, final int lane,
                                          final ReadStructure readStructure,
-                                         final Map<String, ? extends BasecallsConverter.ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD>> barcodeRecordWriterMap,
+                                         final Map<String, ? extends ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD>> barcodeRecordWriterMap,
                                          final boolean demultiplex,
                                          final int maxReadsInRamPerTile,
                                          final List<File> tmpDirs, final int numProcessors,
@@ -70,23 +75,35 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                 outputRecordClass, numProcessors, firstTile, tileLimit, new IlluminaDataProviderFactory(basecallsDir,
                         barcodesDir, lane, readStructure, bclQualityEvaluationStrategy));
 
+        barcodeRecordWriterMap.keySet().forEach(barcode -> {
+            if (barcode != null)
+                this.barcodesMetrics.put(barcode, new BarcodeMetric(barcode, barcode, barcode, new String[]{barcode}));
+        });
+
         File laneDir = new File(basecallsDir, IlluminaFileUtil.longLaneStr(lane));
 
         File[] cycleDirs = IOUtil.getFilesMatchingRegexp(laneDir, IlluminaFileUtil.CYCLE_SUBDIRECTORY_PATTERN);
 
         //CBCLs
-        List<File> cbcls = new ArrayList<>();
+        cbcls = new ArrayList<>();
         Arrays.asList(cycleDirs).forEach(cycleDir -> {
             cbcls.addAll(Arrays.asList(IOUtil.getFilesMatchingRegexp(cycleDir, "^" + IlluminaFileUtil.longLaneStr(lane) + "_(\\d{1,5}).cbcl$")));
         });
+        if (cbcls.size() == 0) {
+            throw new PicardException("No CBCL files found.");
+        }
         IOUtil.assertFilesAreReadable(cbcls);
 
         //locs
         File locsFile = new File(basecallsDir.getParentFile(), "s.locs");
+        LocsFileReader locsFileReader = new LocsFileReader(locsFile);
+        while (locsFileReader.hasNext()) {
+            locs.add(locsFileReader.next());
+        }
         IOUtil.assertFileIsReadable(locsFile);
         //filter
 
-        File[] filterFiles = getTiledFiles(laneDir, Pattern.compile(ParameterizedFileUtil.escapePeriods(
+        filterFiles = getTiledFiles(laneDir, Pattern.compile(ParameterizedFileUtil.escapePeriods(
                 ParameterizedFileUtil.makeLaneTileRegex(".filter", lane))));
         IOUtil.assertFilesAreReadable(Arrays.asList(filterFiles));
 
@@ -98,19 +115,29 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     }
 
     public void doProcessing() {
-        final BaseIlluminaDataProvider dataProvider = factory.makeDataProvider(true);
+
+        final BaseIlluminaDataProvider dataProvider = factory.makeDataProvider(cbcls, locs, filterFiles, barcodesMetrics);
 
         while (dataProvider.hasNext()) {
             final ClusterData cluster = dataProvider.next();
             readProgressLogger.record(null, 0);
-            // If this cluster is passing, or we do NOT want to ONLY emit passing reads, then add it to the next
-            if (cluster.isPf() || includeNonPfReads) {
-                final String barcode = (demultiplex ? cluster.getMatchedBarcode() : null);
-                addRecord(barcode, converter.convertClusterToOutputRecord(cluster));
-            }
+            final String barcode = (demultiplex ? cluster.getMatchedBarcode() : null);
+            addRecord(barcode, converter.convertClusterToOutputRecord(cluster));
         }
 
         dataProvider.close();
+
+        for (String barcode : barcodeRecordWriterMap.keySet()) {
+            SortingCollection<CLUSTER_OUTPUT_RECORD> recordCollection = this.barcodeToRecordCollection.get(barcode);
+            final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
+
+            for (CLUSTER_OUTPUT_RECORD rec : recordCollection) {
+                writer.write(rec);
+                writeProgressLogger.record(null, 0);
+            }
+            log.debug(String.format("Closing file for barcode %s.", barcode));
+            writer.close();
+        }
     }
 
     public synchronized void addRecord(final String barcode, final CLUSTER_OUTPUT_RECORD record) {
