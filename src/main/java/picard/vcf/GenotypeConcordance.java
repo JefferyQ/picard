@@ -432,14 +432,11 @@ public class GenotypeConcordance extends CommandLineProgram {
             final List<Allele> truthAlleles = alleles.truthAlleles();
             final List<Allele> callAlleles  = alleles.callAlleles();
 
-            // Get the alleles present at this site for both samples to use for the output variant context.
+
+            // Get the alleles present at this site for both samples to use for the output variant context, but remove no calls.
             final Set<Allele> siteAlleles = new HashSet<>();
-            if (truthContext != null) {
-                siteAlleles.addAll(truthContext.getAlleles());
-            }
-            if (callContext != null) {
-                siteAlleles.addAll(callContext.getAlleles());
-            }
+            siteAlleles.addAll(allAlleles);
+            siteAlleles.remove(Allele.NO_CALL);
 
             // Initialize the variant context builder
             final VariantContext initialContext = (callContext == null) ? truthContext : callContext;
