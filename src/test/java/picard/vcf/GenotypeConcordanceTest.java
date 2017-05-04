@@ -572,4 +572,20 @@ public class GenotypeConcordanceTest {
 
         Assert.assertEquals(genotypeConcordance.instanceMain(new String[0]), 0);
     }
+
+    @Test
+    public void testNormalizeAllelesForWritingVCF() {
+        final File truthVcfPath = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_ALLELES_TRUTH);
+        final File callVcfPath  = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_ALLELES_CALL);
+
+        final GenotypeConcordance genotypeConcordance = new GenotypeConcordance();
+        genotypeConcordance.TRUTH_VCF = truthVcfPath;
+        genotypeConcordance.TRUTH_SAMPLE = "truth";
+        genotypeConcordance.CALL_VCF = callVcfPath;
+        genotypeConcordance.CALL_SAMPLE = "truth";
+        genotypeConcordance.OUTPUT = new File(OUTPUT_DATA_PATH, "MultipleRefAlleles");
+        genotypeConcordance.OUTPUT_VCF = true;
+
+        Assert.assertEquals(genotypeConcordance.instanceMain(new String[0]), 0);
+    }
 }
