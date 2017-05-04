@@ -25,6 +25,7 @@
 package picard.vcf;
 
 import htsjdk.samtools.metrics.MetricsFile;
+import htsjdk.samtools.metrics.StringHeader;
 import htsjdk.samtools.util.BufferedLineReader;
 import htsjdk.samtools.util.IOUtil;
 import htsjdk.variant.variantcontext.Allele;
@@ -100,6 +101,8 @@ public class GenotypeConcordanceTest {
 
     private static final String NORMALIZE_ALLELES_TRUTH = "normalize_alleles_truth.vcf";
     private static final String NORMALIZE_ALLELES_CALL = "normalize_alleles_call.vcf";
+    private static final String NORMALIZE_NO_CALLS_TRUTH = "normalize_no_calls_truth.vcf";
+    private static final String NORMALIZE_NO_CALLS_CALL = "normalize_no_calls_call.vcf";
 
     @AfterClass
     public void tearDown() {
@@ -575,8 +578,8 @@ public class GenotypeConcordanceTest {
 
     @Test
     public void testNormalizeAllelesForWritingVCF() {
-        final File truthVcfPath = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_ALLELES_TRUTH);
-        final File callVcfPath  = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_ALLELES_CALL);
+        final File truthVcfPath = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_NO_CALLS_TRUTH);
+        final File callVcfPath  = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_NO_CALLS_CALL);
 
         final GenotypeConcordance genotypeConcordance = new GenotypeConcordance();
         genotypeConcordance.TRUTH_VCF = truthVcfPath;
