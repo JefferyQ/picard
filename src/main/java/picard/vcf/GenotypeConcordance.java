@@ -736,8 +736,8 @@ public class GenotypeConcordance extends CommandLineProgram {
                 // Truth reference is shorter than call reference
                 final String suffix = getStringSuffix(callRef, truthRef, "Ref alleles mismatch between: " + truthContext + " and " + callContext);
                 final int insertIdx = truthRef.length();
-                truthAllele1 = spliceOrAppendString(truthAllele1, suffix, insertIdx);
-                truthAllele2 = spliceOrAppendString(truthAllele2, suffix, insertIdx);
+                truthAllele1 = truthAllele1.equals(Allele.NO_CALL_STRING) ? truthAllele1 : spliceOrAppendString(truthAllele1, suffix, insertIdx);
+                truthAllele2 = truthAllele2.equals(Allele.NO_CALL_STRING) ? truthAllele2 : spliceOrAppendString(truthAllele2, suffix, insertIdx);
                 truthRef = truthRef + suffix;
 
             }
@@ -745,8 +745,8 @@ public class GenotypeConcordance extends CommandLineProgram {
                 // call reference is shorter than truth:
                 final String suffix = getStringSuffix(truthRef, callRef, "Ref alleles mismatch between: " + truthContext + " and " + callContext);
                 final int insertIdx = callRef.length();
-                callAllele1 = spliceOrAppendString(callAllele1, suffix, insertIdx);
-                callAllele2 = spliceOrAppendString(callAllele2, suffix, insertIdx);
+                callAllele1 = callAllele1.equals(Allele.NO_CALL_STRING) ? callAllele1 : spliceOrAppendString(callAllele1, suffix, insertIdx);
+                callAllele2 = callAllele2.equals(Allele.NO_CALL_STRING) ? callAllele2 : spliceOrAppendString(callAllele2, suffix, insertIdx);
                 callRef = callRef + suffix;
             }
             else {
