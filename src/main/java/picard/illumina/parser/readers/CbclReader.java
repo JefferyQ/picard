@@ -86,9 +86,10 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
             final ByteBuffer byteBuffer = ByteBuffer.allocate(INITIAL_HEADER_SIZE);
             byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
             for (Map.Entry<Integer, Map<Integer, File>> cycleMap : surfaceToTileToCbclMap.entrySet()) {
-                for (int i = 1; i <= cycles; i++) {
+                for (int i = 0; i < cycles; i++) {
                     currentTile[i] = 0;
-                    final File bclFile = cycleMap.getValue().get(i);
+                    //cycleMap is 1 indexed
+                    final File bclFile = cycleMap.getValue().get(i + 1);
 
                     final InputStream stream = open(bclFile, false, false, false);
                     int read = stream.read(byteBuffer.array());
