@@ -15,17 +15,19 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
-    private final Iterator<AbstractIlluminaPositionFileReader.PositionInfo> locs;
+    private final List<AbstractIlluminaPositionFileReader.PositionInfo> locs;
+    private Iterator<AbstractIlluminaPositionFileReader.PositionInfo> locsIterator;
     private final CbclReader reader;
     private final ReadStructure outputReadStructure;
     private final boolean usingQualityScores;
     private final Map<String, BarcodeMetric> barcodeMetricMap;
+    private int currentTile;
 
     public NewIlluminaDataProvider(final List<File> cbcls, final List<AbstractIlluminaPositionFileReader.PositionInfo> locs,
                                    final File[] filterFiles, final int lane, final OutputMapping outputMapping,
                                    boolean usingQualityScores, final Map<String, BarcodeMetric> barcodesMetrics) {
         super(lane, outputMapping);
-        this.locs = locs.iterator();
+        this.locs = locs;
         this.usingQualityScores = usingQualityScores;
         this.barcodeMetricMap = barcodesMetrics;
         Map<Integer, File> filterFileMap = new HashMap<>();
@@ -54,7 +56,13 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
     @Override
     public ClusterData next() {
         CbclData cbclData = reader.next();
-        AbstractIlluminaPositionFileReader.PositionInfo positionInfo = locs.next();
+
+        //new tile.. reset locs iterator
+        if (currentTile != cbclData.getTile()) {
+            currentTile = cbclData.getTile();
+            locsIterator = locs.iterator();
+        }
+        AbstractIlluminaPositionFileReader.PositionInfo positionInfo = locsIterator.next();
 
         final ClusterData cluster = new ClusterData(outputReadTypes);
         cluster.setLane(lane);
