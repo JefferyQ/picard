@@ -577,9 +577,12 @@ public class GenotypeConcordanceTest {
     }
 
     @Test
-    public void testNormalizeAllelesForWritingVCF() {
+    public void testNormalizeAllelesForWritingVCF() throws FileNotFoundException {
         final File truthVcfPath = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_NO_CALLS_TRUTH);
         final File callVcfPath  = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_NO_CALLS_CALL);
+        final File outputBaseFileName    = new File(OUTPUT_DATA_PATH, "MultipleRefAlleles");
+        final File outputContingencyMetrics     = new File(outputBaseFileName.getAbsolutePath() + GenotypeConcordance.CONTINGENCY_METRICS_FILE_EXTENSION);
+        outputContingencyMetrics.deleteOnExit();
 
         final GenotypeConcordance genotypeConcordance = new GenotypeConcordance();
         genotypeConcordance.TRUTH_VCF = truthVcfPath;
@@ -590,5 +593,18 @@ public class GenotypeConcordanceTest {
         genotypeConcordance.OUTPUT_VCF = true;
 
         Assert.assertEquals(genotypeConcordance.instanceMain(new String[0]), 0);
+
+        final MetricsFile<GenotypeConcordanceContingencyMetrics, Comparable<?>> output = new MetricsFile<GenotypeConcordanceContingencyMetrics, Comparable<?>>();
+        output.read(new FileReader(outputContingencyMetrics));
+
+        for (final GenotypeConcordanceContingencyMetrics metrics : output.getMetrics()) {
+            if(metrics.VARIANT_TYPE == VariantContext.Type.INDEL){
+                Assert.assertEquals(metrics.TP_COUNT, 3);
+                Assert.assertEquals(metrics.TN_COUNT, 3);
+                Assert.assertEquals(metrics.FP_COUNT, 0);
+                Assert.assertEquals(metrics.FN_COUNT, 0);
+                Assert.assertEquals(metrics.EMPTY_COUNT, 2);
+            }
+        }
     }
 }

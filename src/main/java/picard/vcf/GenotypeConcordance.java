@@ -432,7 +432,6 @@ public class GenotypeConcordance extends CommandLineProgram {
             final List<Allele> truthAlleles = alleles.truthAlleles();
             final List<Allele> callAlleles  = alleles.callAlleles();
 
-
             // Get the alleles present at this site for both samples to use for the output variant context, but remove no calls.
             final Set<Allele> siteAlleles = new HashSet<>();
             siteAlleles.addAll(allAlleles);
