@@ -27,7 +27,7 @@ import java.util.zip.GZIPInputStream;
  * <p>
  * q-val mapping info
  * Bytes 0-3   Number of bins (B), zero indicates no mapping
- * B pairs of 4 byte values (if B > 0) {from, to}, {from, to}, {from, to} …from: quality score bin to: quality score
+ * B pairs of 4 byte values (if B > 0) {from, to}, {from, to}, {from, to} from: quality score bin to: quality score
  * <p>
  * Number of tile records                                  unsigned 32bits little endian integer
  * <p>
