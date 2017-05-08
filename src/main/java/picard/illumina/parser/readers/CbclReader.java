@@ -183,7 +183,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                     TileData currentTileData = currentCycleData.tileInfo[currentTile[totalCycleCount]];
                     try {
                         if (cachedTile[totalCycleCount] == null) {
-                            if (!cachedFilter.containsKey(currentTileData.tileNum)) {
+                            if (!cachedFilter.containsKey(currentTileData.tileNum) && !currentCycleData.pfExcluded) {
                                 cacheFilter(currentTileData);
                             }
                             cacheTile(totalCycleCount, currentTileData, currentCycleData);
@@ -202,7 +202,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                             return;
                         }
                         currentTileData = currentCycleData.tileInfo[currentTile[totalCycleCount]];
-                        if (!cachedFilter.containsKey(currentTileData.tileNum)) {
+                        if (!cachedFilter.containsKey(currentTileData.tileNum) && !currentCycleData.pfExcluded) {
                             cacheFilter(currentTileData);
                         }
                         cacheTile(totalCycleCount, currentTileData, currentCycleData);
