@@ -578,10 +578,10 @@ public class GenotypeConcordanceTest {
 
     @Test
     public void testNormalizeAllelesForWritingVCF() throws FileNotFoundException {
-        final File truthVcfPath = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_NO_CALLS_TRUTH);
-        final File callVcfPath  = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_NO_CALLS_CALL);
-        final File outputBaseFileName    = new File(OUTPUT_DATA_PATH, "MultipleRefAlleles");
-        final File outputContingencyMetrics     = new File(outputBaseFileName.getAbsolutePath() + GenotypeConcordance.CONTINGENCY_METRICS_FILE_EXTENSION);
+        final File truthVcfPath             = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_NO_CALLS_TRUTH);
+        final File callVcfPath              = new File(TEST_DATA_PATH.getAbsolutePath(), NORMALIZE_NO_CALLS_CALL);
+        final File outputBaseFileName       = new File(OUTPUT_DATA_PATH, "MultipleRefAlleles");
+        final File outputContingencyMetrics = new File(outputBaseFileName.getAbsolutePath() + GenotypeConcordance.CONTINGENCY_METRICS_FILE_EXTENSION);
         outputContingencyMetrics.deleteOnExit();
 
         final GenotypeConcordance genotypeConcordance = new GenotypeConcordance();

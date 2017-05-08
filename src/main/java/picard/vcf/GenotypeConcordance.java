@@ -327,10 +327,10 @@ public class GenotypeConcordance extends CommandLineProgram {
                 final String condition = truthVariantContextType + " " + callVariantContextType;
                 final Integer count = unClassifiedStatesMap.getOrDefault(condition, 0) + 1;
                 unClassifiedStatesMap.put(condition, count);
+            } else {
+                // write to the output VCF
+                writer.ifPresent(w -> writeVcfTuple(tuple, w, scheme));
             }
-
-            // write to the output VCF
-            writer.ifPresent(w -> writeVcfTuple(tuple, w, scheme));
 
             //final VariantContext variantContextForLogging = tuple.leftVariantContext.orElseGet(tuple.rightVariantContext::get); // FIXME
             final VariantContext variantContextForLogging = tuple.leftVariantContext.isPresent() ? tuple.leftVariantContext.get() : tuple.rightVariantContext.get();
