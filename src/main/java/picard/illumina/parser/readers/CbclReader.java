@@ -3,6 +3,7 @@ package picard.illumina.parser.readers;
 import htsjdk.samtools.util.CloseableIterator;
 import htsjdk.samtools.util.CloserUtil;
 import htsjdk.samtools.util.RuntimeIOException;
+import picard.PicardException;
 import picard.illumina.parser.CbclData;
 
 import java.io.ByteArrayInputStream;
@@ -16,6 +17,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -72,6 +76,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
     public CbclReader(final List<File> cbcls, final Map<Integer, File> filterFileMap, final int[] outputLengths) {
         super(outputLengths);
+        Map<Integer, Map<Integer, File>> surfaceToTileToCbclMap = sortCbcls(cbcls);
         cycleData = new CycleData[cycles];
         cachedTile = new ByteBuffer[cycles];
         currentTile = new int[cycles];
@@ -80,71 +85,95 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
         try {
             final ByteBuffer byteBuffer = ByteBuffer.allocate(INITIAL_HEADER_SIZE);
             byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-            for (int i = 0; i < cycles; i++) {
-                currentTile[i] = 0;
-                final File bclFile = cbcls.get(i);
+            for (Map.Entry<Integer, Map<Integer, File>> cycleMap : surfaceToTileToCbclMap.entrySet()) {
+                for (int i = 1; i <= cycles; i++) {
+                    currentTile[i] = 0;
+                    final File bclFile = cycleMap.getValue().get(i);
 
-                final InputStream stream = open(bclFile, false, false, false);
-                int read = stream.read(byteBuffer.array());
+                    final InputStream stream = open(bclFile, false, false, false);
+                    int read = stream.read(byteBuffer.array());
 
-                //we need to read the first 6 bytes to determine the header size
-                if (read != INITIAL_HEADER_SIZE) {
-                    close();
-                    throw new RuntimeIOException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
+                    //we need to read the first 6 bytes to determine the header size
+                    if (read != INITIAL_HEADER_SIZE) {
+                        close();
+                        throw new RuntimeIOException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
+                    }
+
+                    short version = byteBuffer.getShort();
+                    int headerSize = byteBuffer.getInt();
+
+                    final ByteBuffer headerBuffer = ByteBuffer.allocate(headerSize - INITIAL_HEADER_SIZE);
+                    headerBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+                    read = stream.read(headerBuffer.array());
+                    if (read != headerSize - INITIAL_HEADER_SIZE) {
+                        close();
+                        throw new RuntimeIOException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
+                    }
+
+                    byte bitsPerBasecall = headerBuffer.get();
+                    byte bitsPerQualityScore = headerBuffer.get();
+
+                    if (bitsPerBasecall != 2 && bitsPerBasecall != bitsPerQualityScore) {
+                        close();
+                        throw new RuntimeIOException("CBCL data not encoded in nibbles. (not currently supported)");
+                    }
+
+                    int numberOfBins = headerBuffer.getInt();
+
+                    byte[] qualityBins = new byte[numberOfBins];
+                    //each bin has a pair of 4 byte mappings
+                    for (int j = 0; j < numberOfBins; j++) {
+                        headerBuffer.getInt(); // first int is "from" value, which we don't need
+                        int to = headerBuffer.getInt();
+                        qualityBins[j] = (byte) to;
+                    }
+
+                    int numTiles = headerBuffer.getInt();
+                    TileData[] tileInfo = new TileData[numTiles];
+                    for (int j = 0; j < numTiles; j++) {
+                        int tileNum = headerBuffer.getInt();
+                        int numClustersInTile = headerBuffer.getInt();
+                        int uncompressedBlockSize = headerBuffer.getInt();
+                        int compressedBlockSize = headerBuffer.getInt();
+                        tileInfo[j] = new TileData(tileNum, numClustersInTile, uncompressedBlockSize, compressedBlockSize);
+                    }
+
+                    boolean pfExcluded = headerBuffer.get() == 1;
+                    cycleData[i] = new CycleData(version, headerSize, bitsPerBasecall, bitsPerQualityScore, numberOfBins, qualityBins, numTiles, tileInfo, pfExcluded);
+                    this.streams[i] = stream;
+                    this.streamFiles[i] = bclFile;
+                    byteBuffer.clear();
+                    headerBuffer.clear();
                 }
-
-                short version = byteBuffer.getShort();
-                int headerSize = byteBuffer.getInt();
-
-                final ByteBuffer headerBuffer = ByteBuffer.allocate(headerSize - INITIAL_HEADER_SIZE);
-                headerBuffer.order(ByteOrder.LITTLE_ENDIAN);
-
-                read = stream.read(headerBuffer.array());
-                if (read != headerSize - INITIAL_HEADER_SIZE) {
-                    close();
-                    throw new RuntimeIOException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
-                }
-
-                byte bitsPerBasecall = headerBuffer.get();
-                byte bitsPerQualityScore = headerBuffer.get();
-
-                if (bitsPerBasecall != 2 && bitsPerBasecall != bitsPerQualityScore) {
-                    close();
-                    throw new RuntimeIOException("CBCL data not encoded in nibbles. (not currently supported)");
-                }
-
-                int numberOfBins = headerBuffer.getInt();
-
-                byte[] qualityBins = new byte[numberOfBins];
-                //each bin has a pair of 4 byte mappings
-                for (int j = 0; j < numberOfBins; j++) {
-                    headerBuffer.getInt(); // first int is "from" value, which we don't need
-                    int to = headerBuffer.getInt();
-                    qualityBins[j] = (byte) to;
-                }
-
-                int numTiles = headerBuffer.getInt();
-                TileData[] tileInfo = new TileData[numTiles];
-                for (int j = 0; j < numTiles; j++) {
-                    int tileNum = headerBuffer.getInt();
-                    int numClustersInTile = headerBuffer.getInt();
-                    int uncompressedBlockSize = headerBuffer.getInt();
-                    int compressedBlockSize = headerBuffer.getInt();
-                    tileInfo[j] = new TileData(tileNum, numClustersInTile, uncompressedBlockSize, compressedBlockSize);
-                }
-
-                boolean pfExcluded = headerBuffer.get() == 1;
-                cycleData[i] = new CycleData(version, headerSize, bitsPerBasecall, bitsPerQualityScore, numberOfBins, qualityBins, numTiles, tileInfo, pfExcluded);
-                this.streams[i] = stream;
-                this.streamFiles[i] = bclFile;
-                byteBuffer.clear();
-                headerBuffer.clear();
             }
 
 
         } catch (final IOException ioe) {
             throw new RuntimeIOException(ioe);
         }
+    }
+
+    private Map<Integer, Map<Integer, File>> sortCbcls(List<File> cbcls) {
+        Map<Integer, Map<Integer, File>> sortedMap = new TreeMap<>();
+        Pattern pattern = Pattern.compile("^.+C(\\d{1,4}).+L(\\d{1,3})_(\\d{1}).cbcl$");
+        for (File cbcl : cbcls) {
+            Matcher matcher = pattern.matcher(cbcl.getAbsolutePath());
+            if (!matcher.matches()) {
+                throw new PicardException("CBCL File " + cbcl.getAbsolutePath() + " does not match expected pattern.");
+            }
+            Integer surface = Integer.valueOf(matcher.group(3));
+            Integer cycle = Integer.valueOf(matcher.group(1));
+            if (sortedMap.containsKey(surface)) {
+                sortedMap.get(surface).put(cycle, cbcl);
+            } else {
+                Map<Integer, File> cycleMap = new HashMap<>();
+                cycleMap.put(cycle, cbcl);
+                sortedMap.put(surface, cycleMap);
+            }
+        }
+
+        return sortedMap;
     }
 
     @Override
@@ -234,57 +263,52 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     }
 
     private void cacheTile(int totalCycleCount, TileData tileData, CycleData currentCycleData) throws IOException {
-        ByteBuffer tileByteBuffer = ByteBuffer.allocate(tileData.compressedBlockSize);
+        byte[] tileByteBuffer = new byte[tileData.compressedBlockSize];
         //we are going to explode the nibbles in to bytes to make PF filtering easier
-        ByteBuffer tempUncompressedByteBuffer = ByteBuffer.allocate(tileData.uncompressedBlockSize);
-        ByteBuffer uncompressedByteBuffer = ByteBuffer.allocate(tileData.uncompressedBlockSize);
-        ByteBuffer unNibbledByteBuffer = ByteBuffer.allocate(tileData.uncompressedBlockSize * 2);
-
-        tileByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-        uncompressedByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        byte[] uncompressedByteBuffer = new byte[tileData.uncompressedBlockSize];
+        // ByteBuffer uncompressedByteBuffer = ByteBuffer.allocate(tileData.uncompressedBlockSize);
+        byte[] unNibbledByteBuffer = new byte[tileData.uncompressedBlockSize * 2];
 
         // Read the whole compressed block into a buffer, then sanity check the length
-        int readBytes = this.streams[totalCycleCount].read(tileByteBuffer.array());
+        int readBytes = this.streams[totalCycleCount].read(tileByteBuffer);
         if (readBytes != tileData.compressedBlockSize) {
             throw new IOException(String.format("Error while reading from BCL file for cycle %d. Offending file on disk is %s",
                     (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()));
         }
 
         // Uncompress the data from the buffer we just wrote - use gzip input stream to write to uncompressed buffer
-        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(Arrays.copyOfRange(tileByteBuffer.array(), 0, readBytes));
+        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(Arrays.copyOfRange(tileByteBuffer, 0, readBytes));
         if (cachedTile[totalCycleCount] != null) {
             //clear the old cache
             cachedTile[totalCycleCount] = null;
         }
-        GZIPInputStream gzipInputStream = new GZIPInputStream(byteInputStream, uncompressedByteBuffer.capacity());
-        int read;
-        int totalRead = 0;
-        while ((read = gzipInputStream.read(tempUncompressedByteBuffer.array(), 0, tempUncompressedByteBuffer.capacity())) != -1) {
-            uncompressedByteBuffer.put(tempUncompressedByteBuffer.array(), 0, read);
-            totalRead += read;
-        }
-        if (totalRead != tileData.uncompressedBlockSize) {
+        GZIPInputStream gzipInputStream = new GZIPInputStream(byteInputStream, uncompressedByteBuffer.length);
+        int read = gzipInputStream.read(uncompressedByteBuffer, 0, uncompressedByteBuffer.length);
+
+        if (read != tileData.uncompressedBlockSize) {
             throw new IOException(String.format("Error while decompressing from BCL file for cycle %d. Offending file on disk is %s",
                     (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()));
         }
 
         // Read uncompressed data from the buffer and expand each nibble into a full byte for ease of use
-        uncompressedByteBuffer.flip();
-        while (uncompressedByteBuffer.hasRemaining()) {
-            byte singleByte = uncompressedByteBuffer.get();
-            unNibbledByteBuffer.put((byte) (singleByte & 0x0f));
-            unNibbledByteBuffer.put((byte) ((singleByte >> 4) & 0x0f));
+        int index = 0;
+        for (byte singleByte : uncompressedByteBuffer) {
+            unNibbledByteBuffer[index] = (byte) (singleByte & 0x0f);
+            index++;
+            unNibbledByteBuffer[index] = (byte) ((singleByte >> 4) & 0x0f);
+            index++;
         }
         gzipInputStream.close();
 
         // Write buffer contents to cached tile array
-        unNibbledByteBuffer.flip();
-        //if nonPF reads are included we need to strip them out
+        // if nonPF reads are included we need to strip them out
         if (!currentCycleData.pfExcluded) {
             ByteBuffer uncompressedFilteredByteBuffer = ByteBuffer.allocate(tileData.uncompressedBlockSize * 2);
             boolean[] filterDatas = cachedFilter.get(tileData.tileNum);
+            int i = 0;
             for (boolean filterData : filterDatas) {
-                byte readByte = unNibbledByteBuffer.get();
+                byte readByte = unNibbledByteBuffer[i];
+                i++;
                 if (filterData) {
                     uncompressedFilteredByteBuffer.put(readByte);
                 }
@@ -292,7 +316,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
             uncompressedFilteredByteBuffer.flip();
             cachedTile[totalCycleCount] = uncompressedFilteredByteBuffer.slice();
         } else {
-            cachedTile[totalCycleCount] = unNibbledByteBuffer;
+            cachedTile[totalCycleCount] = ByteBuffer.wrap(unNibbledByteBuffer);
         }
     }
 }
