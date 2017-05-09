@@ -197,7 +197,9 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
         if (queue == null) {
             advance();
         }
-        return queue;
+        CbclData data = queue;
+        queue = null;
+        return data;
     }
 
     @Override
@@ -275,29 +277,29 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     }
 
     private void cacheTile(int totalCycleCount, TileData tileData, CycleData currentCycleData) throws IOException {
-        byte[] tileByteBuffer = new byte[tileData.compressedBlockSize];
+        byte[] tileByteArray = new byte[tileData.compressedBlockSize];
         //we are going to explode the nibbles in to bytes to make PF filtering easier
-        byte[] uncompressedByteBuffer = new byte[tileData.uncompressedBlockSize];
-        // ByteBuffer uncompressedByteBuffer = ByteBuffer.allocate(tileData.uncompressedBlockSize);
-        byte[] unNibbledByteBuffer = new byte[tileData.uncompressedBlockSize * 2];
+        byte[] uncompressedByteArray = new byte[tileData.uncompressedBlockSize];
+        // ByteBuffer uncompressedByteArray = ByteBuffer.allocate(tileData.uncompressedBlockSize);
+        byte[] unNibbledByteArray = new byte[tileData.uncompressedBlockSize * 2];
 
         // Read the whole compressed block into a buffer, then sanity check the length
-        int readBytes = this.streams[totalCycleCount].read(tileByteBuffer);
+        int readBytes = this.streams[totalCycleCount].read(tileByteArray);
         if (readBytes != tileData.compressedBlockSize) {
             throw new IOException(String.format("Error while reading from BCL file for cycle %d. Offending file on disk is %s",
                     (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()));
         }
 
         // Uncompress the data from the buffer we just wrote - use gzip input stream to write to uncompressed buffer
-        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(Arrays.copyOfRange(tileByteBuffer, 0, readBytes));
+        ByteArrayInputStream byteInputStream = new ByteArrayInputStream(Arrays.copyOfRange(tileByteArray, 0, readBytes));
         if (cachedTiles[totalCycleCount] != null) {
             //clear the old cache
             cachedTiles[totalCycleCount] = null;
         }
-        GZIPInputStream gzipInputStream = new GZIPInputStream(byteInputStream, uncompressedByteBuffer.length);
+        GZIPInputStream gzipInputStream = new GZIPInputStream(byteInputStream, uncompressedByteArray.length);
         int read;
         int totalRead = 0;
-        while ((read = gzipInputStream.read(uncompressedByteBuffer, totalRead, uncompressedByteBuffer.length - totalRead)) != -1) {
+        while ((read = gzipInputStream.read(uncompressedByteArray, totalRead, uncompressedByteArray.length - totalRead)) != -1) {
             if (read == 0) break;
             totalRead += read;
         }
@@ -308,10 +310,10 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
         // Read uncompressed data from the buffer and expand each nibble into a full byte for ease of use
         int index = 0;
-        for (byte singleByte : uncompressedByteBuffer) {
-            unNibbledByteBuffer[index] = (byte) (singleByte & 0x0f);
+        for (byte singleByte : uncompressedByteArray) {
+            unNibbledByteArray[index] = (byte) (singleByte & 0x0f);
             index++;
-            unNibbledByteBuffer[index] = (byte) ((singleByte >> 4) & 0x0f);
+            unNibbledByteArray[index] = (byte) ((singleByte >> 4) & 0x0f);
             index++;
         }
         gzipInputStream.close();
@@ -319,20 +321,23 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
         // Write buffer contents to cached tile array
         // if nonPF reads are included we need to strip them out
         if (!currentCycleData.pfExcluded) {
-            ByteBuffer uncompressedFilteredByteBuffer = ByteBuffer.allocate(tileData.uncompressedBlockSize * 2);
             boolean[] filterDatas = cachedFilter.get(tileData.tileNum);
+            int sum = 0;
+            for (boolean b : filterDatas) {
+                sum += b ? 1 : 0;
+            }
+            byte[] filteredByteArray = new byte[sum];
             int i = 0;
             for (boolean filterData : filterDatas) {
-                byte readByte = unNibbledByteBuffer[i];
-                i++;
+                byte readByte = unNibbledByteArray[i];
                 if (filterData) {
-                    uncompressedFilteredByteBuffer.put(readByte);
+                    filteredByteArray[i] = readByte;
+                    i++;
                 }
             }
-            uncompressedFilteredByteBuffer.flip();
-            cachedTiles[totalCycleCount] = uncompressedFilteredByteBuffer.slice().array();
+            cachedTiles[totalCycleCount] = filteredByteArray;
         } else {
-            cachedTiles[totalCycleCount] = unNibbledByteBuffer;
+            cachedTiles[totalCycleCount] = unNibbledByteArray;
         }
         cachedTilesPosition[totalCycleCount] = 0;
     }
