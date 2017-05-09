@@ -12,7 +12,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -62,12 +61,13 @@ import java.util.zip.GZIPInputStream;
 
 public class CbclReader extends BaseBclReader implements CloseableIterator<CbclData> {
 
-    private ByteBuffer[] cachedTile;
+    private byte[][] cachedTiles;
+    private int[] cachedTilesPosition;
 
     private int[] currentTile;
     private int currentSurface = 1;
 
-    private List<CbclData> queue = new ArrayList<>();
+    private CbclData queue = null;
 
     private final CycleData[] cycleData;
     private Map<Integer, File> filterFileMap;
@@ -80,7 +80,8 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
         super(outputLengths);
         surfaceToTileToCbclMap = sortCbcls(cbcls);
         cycleData = new CycleData[cycles];
-        cachedTile = new ByteBuffer[cycles];
+        cachedTiles = new byte[cycles][];
+        cachedTilesPosition = new int[cycles];
         currentTile = new int[cycles];
         this.filterFileMap = filterFileMap;
 
@@ -186,20 +187,17 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
     @Override
     public boolean hasNext() {
-        if (queue.isEmpty()) {
+        if (queue == null) {
             advance();
         }
-        return !queue.isEmpty();
+        return !(queue == null);
     }
 
     public CbclData next() {
-        if (queue.isEmpty()) {
+        if (queue == null) {
             advance();
         }
-
-        final CbclData data = queue.get(0);
-        queue.remove(0);
-        return data;
+        return queue;
     }
 
     @Override
@@ -219,7 +217,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                     CycleData currentCycleData = cycleData[totalCycleCount];
                     TileData currentTileData = currentCycleData.tileInfo[currentTile[totalCycleCount]];
                     try {
-                        if (cachedTile[totalCycleCount] == null) {
+                        if (cachedTiles[totalCycleCount] == null) {
                             if (!cachedFilter.containsKey(currentTileData.tileNum) && !currentCycleData.pfExcluded) {
                                 cacheFilter(currentTileData);
                             }
@@ -231,7 +229,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                                 (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()), e);
                     }
 
-                    if (!cachedTile[totalCycleCount].hasRemaining()) {
+                    if (cachedTilesPosition[totalCycleCount] >= cachedTiles[totalCycleCount].length) {
                         //on to the next tile
                         currentTile[totalCycleCount]++;
                         //if past the last tile then go to the next surface
@@ -239,7 +237,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                             if (currentSurface < surfaceToTileToCbclMap.size()) {
                                 readSurface(++currentSurface);
                                 currentTile[totalCycleCount] = 0;
-                                cachedTile[totalCycleCount] = null;
+                                cachedTiles[totalCycleCount] = null;
                             } else {
                                 return;
                             }
@@ -251,7 +249,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                         cacheTile(totalCycleCount, currentTileData, currentCycleData);
                     }
 
-                    int singleByte = cachedTile[totalCycleCount].get();
+                    int singleByte = cachedTiles[totalCycleCount][cachedTilesPosition[totalCycleCount]++];
 
                     decodeQualityBinnedBasecall(data, read, cycle, singleByte, currentCycleData);
 
@@ -262,7 +260,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
             }
         }
-        this.queue.add(data);
+        this.queue = data;
     }
 
     private void cacheFilter(TileData currentTileData) {
@@ -292,9 +290,9 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
         // Uncompress the data from the buffer we just wrote - use gzip input stream to write to uncompressed buffer
         ByteArrayInputStream byteInputStream = new ByteArrayInputStream(Arrays.copyOfRange(tileByteBuffer, 0, readBytes));
-        if (cachedTile[totalCycleCount] != null) {
+        if (cachedTiles[totalCycleCount] != null) {
             //clear the old cache
-            cachedTile[totalCycleCount] = null;
+            cachedTiles[totalCycleCount] = null;
         }
         GZIPInputStream gzipInputStream = new GZIPInputStream(byteInputStream, uncompressedByteBuffer.length);
         int read;
@@ -332,9 +330,10 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                 }
             }
             uncompressedFilteredByteBuffer.flip();
-            cachedTile[totalCycleCount] = uncompressedFilteredByteBuffer.slice();
+            cachedTiles[totalCycleCount] = uncompressedFilteredByteBuffer.slice().array();
         } else {
-            cachedTile[totalCycleCount] = ByteBuffer.wrap(unNibbledByteBuffer);
+            cachedTiles[totalCycleCount] = unNibbledByteBuffer;
         }
+        cachedTilesPosition[totalCycleCount] = 0;
     }
 }
