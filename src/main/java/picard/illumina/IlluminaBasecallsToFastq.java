@@ -200,6 +200,15 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
     @Option(doc = "Use the new converter", optional = true)
     public boolean USE_NEW_CONVERTER = false;
 
+    @Option(doc = "Maximum mismatches for a barcode to be considered a match.")
+    public int MAX_MISMATCHES = 1;
+
+    @Option(doc = "Minimum difference between number of mismatches in the best and second best barcodes for a barcode to be considered a match.")
+    public int MIN_MISMATCH_DELTA = 1;
+
+    @Option(doc = "Maximum allowable number of no-calls in a barcode read before it is considered unmatchable.")
+    public int MAX_NO_CALLS = 2;
+
     /** Simple switch to control the read name format to emit. */
     public enum ReadNameFormat {
         CASAVA_1_8, ILLUMINA
@@ -279,11 +288,14 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
         final int readsPerCluster = readStructure.templates.length() + readStructure.sampleBarcodes.length();
         if (USE_NEW_CONVERTER) {
             newBasecallsConverter = new NewIlluminaBasecallsConverter<>(BASECALLS_DIR, BARCODES_DIR, LANE, readStructure,
-                    sampleBarcodeFastqWriterMap, demultiplex, Math.max(1, MAX_READS_IN_RAM_PER_TILE / readsPerCluster), TMP_DIR, NUM_PROCESSORS,
+                    sampleBarcodeFastqWriterMap, demultiplex, Math.max(1, MAX_READS_IN_RAM_PER_TILE / readsPerCluster),
+                    TMP_DIR, NUM_PROCESSORS,
                     FIRST_TILE, TILE_LIMIT, queryNameComparator,
                     new FastqRecordsForClusterCodec(readStructure.templates.length(),
-                            readStructure.sampleBarcodes.length(), readStructure.molecularBarcode.length()), FastqRecordsForCluster.class, bclQualityEvaluationStrategy,
-                    this.APPLY_EAMSS_FILTER, INCLUDE_NON_PF_READS, IGNORE_UNEXPECTED_BARCODES);
+                            readStructure.sampleBarcodes.length(), readStructure.molecularBarcode.length()),
+                    FastqRecordsForCluster.class, bclQualityEvaluationStrategy,
+                    this.APPLY_EAMSS_FILTER, INCLUDE_NON_PF_READS, IGNORE_UNEXPECTED_BARCODES, MAX_NO_CALLS,
+                    MAX_MISMATCHES, MIN_MISMATCH_DELTA, MINIMUM_QUALITY);
 
             newBasecallsConverter.setConverter(
                     new ClusterToFastqRecordsForClusterConverter(

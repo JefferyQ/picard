@@ -254,16 +254,33 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
     @Option(doc="The list of tags to store each molecular index.  The number of tags should match the number of molecular indexes.", optional=true)
     public List<String> TAG_PER_MOLECULAR_INDEX;
 
+    @Option(doc = "Use the new converter", optional = true)
+    public boolean USE_NEW_CONVERTER = false;
+
+    @Option(doc = "Maximum mismatches for a barcode to be considered a match.")
+    public int MAX_MISMATCHES = 1;
+
+    @Option(doc = "Minimum difference between number of mismatches in the best and second best barcodes for a barcode to be considered a match.")
+    public int MIN_MISMATCH_DELTA = 1;
+
+    @Option(doc = "Maximum allowable number of no-calls in a barcode read before it is considered unmatchable.")
+    public int MAX_NO_CALLS = 2;
+
     private final Map<String, SAMFileWriterWrapper> barcodeSamWriterMap = new HashMap<String, SAMFileWriterWrapper>();
     private ReadStructure readStructure;
     IlluminaBasecallsConverter<SAMRecordsForCluster> basecallsConverter;
+    private NewIlluminaBasecallsConverter<SAMRecordsForCluster> newBasecallsConverter;
     private static final Log log = Log.getInstance(IlluminaBasecallsToSam.class);
     private BclQualityEvaluationStrategy bclQualityEvaluationStrategy;
 
     @Override
     protected int doWork() {
         initialize();
-        basecallsConverter.doTileProcessing();
+        if (USE_NEW_CONVERTER) {
+            newBasecallsConverter.doProcessing();
+        } else {
+            basecallsConverter.doTileProcessing();
+        }
         return 0;
     }
 
@@ -288,14 +305,6 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
         }
 
         final int numOutputRecords = readStructure.templates.length();
-
-        basecallsConverter = new IlluminaBasecallsConverter<SAMRecordsForCluster>(BASECALLS_DIR, BARCODES_DIR, LANE, readStructure,
-                barcodeSamWriterMap, true, MAX_READS_IN_RAM_PER_TILE/numOutputRecords, TMP_DIR, NUM_PROCESSORS, FORCE_GC,
-                FIRST_TILE, TILE_LIMIT, new QueryNameComparator(), new Codec(numOutputRecords), SAMRecordsForCluster.class,
-                bclQualityEvaluationStrategy, this.APPLY_EAMSS_FILTER, INCLUDE_NON_PF_READS, IGNORE_UNEXPECTED_BARCODES);
-
-        log.info("DONE_READING STRUCTURE IS " + readStructure.toString());
-
         // Combine any adapters and custom adapter pairs from the command line into an array for use in clipping
         final List<AdapterPair> adapters = new ArrayList<>();
         adapters.addAll(ADAPTERS_TO_CHECK);
@@ -303,16 +312,47 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
             adapters.add(new CustomAdapterPair(FIVE_PRIME_ADAPTER, THREE_PRIME_ADAPTER));
         }
 
-        /**
-         * Be sure to pass the outputReadStructure to ClusterDataToSamConverter, which reflects the structure of the output cluster
-         * data which may be different from the input read structure (specifically if there are skips).
-         */
-        final ClusterDataToSamConverter converter = new ClusterDataToSamConverter(RUN_BARCODE, READ_GROUP_ID,
-                basecallsConverter.getFactory().getOutputReadStructure(), adapters)
-                .withMolecularIndexTag(MOLECULAR_INDEX_TAG)
-                .withMolecularIndexQualityTag(MOLECULAR_INDEX_BASE_QUALITY_TAG)
-                .withTagPerMolecularIndex(TAG_PER_MOLECULAR_INDEX);
-        basecallsConverter.setConverter(converter);
+        if (USE_NEW_CONVERTER) {
+            newBasecallsConverter = new NewIlluminaBasecallsConverter<>(BASECALLS_DIR, BARCODES_DIR, LANE, readStructure,
+                    barcodeSamWriterMap, true, Math.max(1, MAX_READS_IN_RAM_PER_TILE / numOutputRecords),
+                    TMP_DIR, NUM_PROCESSORS,
+                    FIRST_TILE, TILE_LIMIT, new QueryNameComparator(),
+                    new Codec(numOutputRecords),
+                    SAMRecordsForCluster.class, bclQualityEvaluationStrategy,
+                    this.APPLY_EAMSS_FILTER, INCLUDE_NON_PF_READS, IGNORE_UNEXPECTED_BARCODES, MAX_NO_CALLS,
+                    MAX_MISMATCHES, MIN_MISMATCH_DELTA, MINIMUM_QUALITY);
+
+            /*
+             * Be sure to pass the outputReadStructure to ClusterDataToSamConverter, which reflects the structure of the output cluster
+             * data which may be different from the input read structure (specifically if there are skips).
+             */
+            final ClusterDataToSamConverter converter = new ClusterDataToSamConverter(RUN_BARCODE, READ_GROUP_ID,
+                    newBasecallsConverter.getFactory().getOutputReadStructure(), adapters)
+                    .withMolecularIndexTag(MOLECULAR_INDEX_TAG)
+                    .withMolecularIndexQualityTag(MOLECULAR_INDEX_BASE_QUALITY_TAG)
+                    .withTagPerMolecularIndex(TAG_PER_MOLECULAR_INDEX);
+            newBasecallsConverter.setConverter(converter);
+        } else {
+            basecallsConverter = new IlluminaBasecallsConverter<>(BASECALLS_DIR, BARCODES_DIR, LANE, readStructure,
+                    barcodeSamWriterMap, true, MAX_READS_IN_RAM_PER_TILE / numOutputRecords, TMP_DIR, NUM_PROCESSORS, FORCE_GC,
+                    FIRST_TILE, TILE_LIMIT, new QueryNameComparator(), new Codec(numOutputRecords), SAMRecordsForCluster.class,
+                    bclQualityEvaluationStrategy, this.APPLY_EAMSS_FILTER, INCLUDE_NON_PF_READS, IGNORE_UNEXPECTED_BARCODES);
+
+
+            /*
+             * Be sure to pass the outputReadStructure to ClusterDataToSamConverter, which reflects the structure of the output cluster
+             * data which may be different from the input read structure (specifically if there are skips).
+             */
+            final ClusterDataToSamConverter converter = new ClusterDataToSamConverter(RUN_BARCODE, READ_GROUP_ID,
+                    basecallsConverter.getFactory().getOutputReadStructure(), adapters)
+                    .withMolecularIndexTag(MOLECULAR_INDEX_TAG)
+                    .withMolecularIndexQualityTag(MOLECULAR_INDEX_BASE_QUALITY_TAG)
+                    .withTagPerMolecularIndex(TAG_PER_MOLECULAR_INDEX);
+            basecallsConverter.setConverter(converter);
+        }
+        log.info("DONE_READING STRUCTURE IS " + readStructure.toString());
+
+
 
     }
 

@@ -41,7 +41,7 @@ import java.util.zip.GZIPInputStream;
  * Bytes 4-7   Number of clusters that were written into the current block (required due to bit-packed q-scores)
  * unsigned 32 bit integer
  * <p>
- * Bytes 8-11      Uncompressed block size of the tile data (useful for sanity check whenexcluding non-PF clusters)
+ * Bytes 8-11      Uncompressed block size of the tile data (useful for sanity check when excluding non-PF clusters)
  * unsigned 32 bit integer
  * <p>
  * Bytes 12-15     Compressed block size of the tile data  unsigned 32 bit integer
@@ -71,9 +71,9 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
     private CbclData queue = null;
 
-    private final CycleData[] cycleData;
-    private Map<Integer, File> filterFileMap;
-    private Map<Integer, boolean[]> cachedFilter = new HashMap<>();
+    private CycleData[] cycleData;
+    private final Map<Integer, File> filterFileMap;
+    private final Map<Integer, boolean[]> cachedFilter = new HashMap<>();
     private final Map<Integer, Map<Integer, File>> surfaceToTileToCbclMap;
 
     private static final int INITIAL_HEADER_SIZE = 6;
@@ -82,13 +82,17 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     public CbclReader(final List<File> cbcls, final Map<Integer, File> filterFileMap, final int[] outputLengths) {
         super(outputLengths);
         surfaceToTileToCbclMap = sortCbcls(cbcls);
+        resetCaches();
+        this.filterFileMap = filterFileMap;
+
+        readSurface(1);
+    }
+
+    private void resetCaches() {
         cycleData = new CycleData[cycles];
         cachedTiles = new byte[cycles][];
         cachedTilesPosition = new int[cycles];
         currentTile = new int[cycles];
-        this.filterFileMap = filterFileMap;
-
-        readSurface(1);
     }
 
     private void readSurface(Integer surfaceNum) {
@@ -169,7 +173,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
     private Map<Integer, Map<Integer, File>> sortCbcls(List<File> cbcls) {
         Map<Integer, Map<Integer, File>> sortedMap = new TreeMap<>();
-        Pattern pattern = Pattern.compile("^.+C(\\d{1,4}).+L(\\d{1,3})_(\\d{1}).cbcl$");
+        Pattern pattern = Pattern.compile("^.+C(\\d{1,4}).+L(\\d{1,3})_(\\d).cbcl$");
         for (File cbcl : cbcls) {
             Matcher matcher = pattern.matcher(cbcl.getAbsolutePath());
             if (!matcher.matches()) {
@@ -241,9 +245,9 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                         //if past the last tile then go to the next surface
                         if (currentTile[totalCycleCount] > currentCycleData.tileInfo.length - 1) {
                             if (currentSurface < surfaceToTileToCbclMap.size()) {
+                                resetCaches();
                                 readSurface(++currentSurface);
-                                currentTile[totalCycleCount] = 0;
-                                cachedTiles[totalCycleCount] = null;
+                                currentCycleData = cycleData[totalCycleCount];
                             } else {
                                 return;
                             }
@@ -261,7 +265,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
                     totalCycleCount++;
                 } catch (final IOException ioe) {
-                    throw new RuntimeIOException(ioe);
+                    throw new PicardException(ioe.getMessage());
                 }
 
             }

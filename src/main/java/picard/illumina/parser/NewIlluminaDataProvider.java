@@ -22,14 +22,23 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
     private final boolean usingQualityScores;
     private final Map<String, BarcodeMetric> barcodeMetricMap;
     private int currentTile;
+    private final int maxNoCalls;
+    private final int maxMismatches;
+    private final int minMismatchDelta;
+    private final int minimumBaseQuality;
 
-    public NewIlluminaDataProvider(final List<File> cbcls, final List<AbstractIlluminaPositionFileReader.PositionInfo> locs,
-                                   final File[] filterFiles, final int lane, final OutputMapping outputMapping,
-                                   boolean usingQualityScores, final Map<String, BarcodeMetric> barcodesMetrics) {
+    NewIlluminaDataProvider(final List<File> cbcls, final List<AbstractIlluminaPositionFileReader.PositionInfo> locs,
+                            final File[] filterFiles, final int lane, final OutputMapping outputMapping,
+                            boolean usingQualityScores, final Map<String, BarcodeMetric> barcodesMetrics,
+                            int maxNoCalls, int maxMismatches, int minMismatchDelta, int minimumBaseQuality) {
         super(lane, outputMapping);
         this.locs = locs;
         this.usingQualityScores = usingQualityScores;
         this.barcodeMetricMap = barcodesMetrics;
+        this.maxNoCalls = maxNoCalls;
+        this.maxMismatches = maxMismatches;
+        this.minMismatchDelta = minMismatchDelta;
+        this.minimumBaseQuality = minimumBaseQuality;
         Map<Integer, File> filterFileMap = new HashMap<>();
         for (File filterFile : filterFiles) {
             filterFileMap.put(fileToTile(filterFile.getName()), filterFile);
@@ -77,22 +86,23 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
             barcodeSubsequences[i] = cluster.getRead(barcodeIndices[i]).getBases();
             if (usingQualityScores) qualityScores[i] = cluster.getRead(barcodeIndices[i]).getQualities();
         }
-        final boolean passingFilter = cluster.isPf();
 
         //do we want metrics?
         final BarcodeMatch match = BarcodeMatch.findBestBarcodeAndUpdateMetrics(barcodeSubsequences, qualityScores,
-                passingFilter, barcodeMetricMap, new BarcodeMetric(), 1, 1, 1, 0);
+                true, barcodeMetricMap, new BarcodeMetric(), maxNoCalls, maxMismatches,
+                minMismatchDelta, minimumBaseQuality);
+
         if (match.isMatched()) {
             cluster.setMatchedBarcode(match.getBarcode());
         }
         return cluster;
     }
 
-    protected Integer fileToTile(final String fileName) {
-        final Matcher matcher = Pattern.compile("^s_(\\d+)_(\\d{1,5}).+").matcher(fileName);
+    private Integer fileToTile(final String fileName) {
+        final Matcher matcher = Pattern.compile("^s_\\d+_(\\d{1,5}).+").matcher(fileName);
         if (!matcher.matches()) {
             return null;
         }
-        return Integer.parseInt(matcher.group(2));
+        return Integer.parseInt(matcher.group(1));
     }
 }

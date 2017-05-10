@@ -27,13 +27,15 @@ import java.util.regex.Pattern;
 public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends BasecallsConverter<CLUSTER_OUTPUT_RECORD> {
     private static final Log log = Log.getInstance(NewIlluminaBasecallsConverter.class);
     private final Map<String, BarcodeMetric> barcodesMetrics = new HashMap<>();
-    Map<Integer, File> filterFileMap = new HashMap<>();
-
     final private Map<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> barcodeToRecordCollection =
             new HashMap<>();
     private final List<File> cbcls;
     private final List<AbstractIlluminaPositionFileReader.PositionInfo> locs = new ArrayList<>();
     private final File[] filterFiles;
+    private final int maxNoCalls;
+    private final int maxMismatches;
+    private final int minMismatchDelta;
+    private final int minimumBaseQuality;
 
     /**
      * @param basecallsDir             Where to read basecalls from.
@@ -54,6 +56,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
      * @param outputRecordClass        Inconveniently needed to create SortingCollections.
      * @param includeNonPfReads        If true, will include ALL reads (including those which do not have PF set)
      * @param ignoreUnexpectedBarcodes If true, will ignore reads whose called barcode is not found in barcodeRecordWriterMap,
+     * @param maxNoCalls
+     * @param maxMismatches
+     * @param minMismatchDelta
+     * @param minimumBaseQuality
      */
     public NewIlluminaBasecallsConverter(final File basecallsDir, File barcodesDir, final int lane,
                                          final ReadStructure readStructure,
@@ -68,12 +74,16 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                                          final Class<CLUSTER_OUTPUT_RECORD> outputRecordClass,
                                          final BclQualityEvaluationStrategy bclQualityEvaluationStrategy,
                                          final boolean applyEamssFiltering, final boolean includeNonPfReads,
-                                         final boolean ignoreUnexpectedBarcodes) {
+                                         final boolean ignoreUnexpectedBarcodes, int maxNoCalls, int maxMismatches, int minMismatchDelta, int minimumBaseQuality) {
 
         super(barcodeRecordWriterMap, maxReadsInRamPerTile, tmpDirs, codecPrototype, ignoreUnexpectedBarcodes,
                 demultiplex, outputRecordComparator, includeNonPfReads, bclQualityEvaluationStrategy,
                 outputRecordClass, numProcessors, firstTile, tileLimit, new IlluminaDataProviderFactory(basecallsDir,
                         barcodesDir, lane, readStructure, bclQualityEvaluationStrategy));
+        this.maxNoCalls = maxNoCalls;
+        this.maxMismatches = maxMismatches;
+        this.minMismatchDelta = minMismatchDelta;
+        this.minimumBaseQuality = minimumBaseQuality;
 
         barcodeRecordWriterMap.keySet().forEach(barcode -> {
             if (barcode != null)
@@ -116,7 +126,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
     public void doProcessing() {
 
-        final BaseIlluminaDataProvider dataProvider = factory.makeDataProvider(cbcls, locs, filterFiles, barcodesMetrics);
+        final BaseIlluminaDataProvider dataProvider = factory.makeDataProvider(cbcls, locs, filterFiles, barcodesMetrics,
+                maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality);
 
         while (dataProvider.hasNext()) {
             final ClusterData cluster = dataProvider.next();
@@ -129,6 +140,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         for (String barcode : barcodeRecordWriterMap.keySet()) {
             SortingCollection<CLUSTER_OUTPUT_RECORD> recordCollection = this.barcodeToRecordCollection.get(barcode);
+            if (recordCollection == null) continue;
             final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
 
             for (CLUSTER_OUTPUT_RECORD rec : recordCollection) {
