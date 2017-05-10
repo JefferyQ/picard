@@ -2,11 +2,13 @@ package picard.illumina.parser.readers;
 
 import htsjdk.samtools.util.CloseableIterator;
 import htsjdk.samtools.util.CloserUtil;
+import htsjdk.samtools.util.Log;
 import htsjdk.samtools.util.RuntimeIOException;
 import picard.PicardException;
 import picard.illumina.parser.CbclData;
 
 import java.io.ByteArrayInputStream;
+import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -75,6 +77,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     private final Map<Integer, Map<Integer, File>> surfaceToTileToCbclMap;
 
     private static final int INITIAL_HEADER_SIZE = 6;
+    private static final Log log = Log.getInstance(CbclReader.class);
 
     public CbclReader(final List<File> cbcls, final Map<Integer, File> filterFileMap, final int[] outputLengths) {
         super(outputLengths);
@@ -89,6 +92,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     }
 
     private void readSurface(Integer surfaceNum) {
+        log.info("Reading surface " + surfaceNum);
         try {
             final ByteBuffer byteBuffer = ByteBuffer.allocate(INITIAL_HEADER_SIZE);
             byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -119,7 +123,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                 read = stream.read(headerBuffer.array());
                 if (read != headerSize - INITIAL_HEADER_SIZE) {
                     close();
-                    throw new RuntimeIOException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
+                    throw new PicardException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
                 }
 
                 byte bitsPerBasecall = headerBuffer.get();
@@ -127,7 +131,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
                 if (bitsPerBasecall != 2 && bitsPerBasecall != bitsPerQualityScore) {
                     close();
-                    throw new RuntimeIOException("CBCL data not encoded in nibbles. (not currently supported)");
+                    throw new PicardException("CBCL data not encoded in nibbles. (not currently supported)");
                 }
 
                 int numberOfBins = headerBuffer.getInt();
@@ -227,7 +231,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                         }
                     } catch (IOException e) {
                         // when logging the error, increment cycle by 1, since totalCycleCount is zero-indexed but Illumina directories are 1-indexed.
-                        throw new IOException(String.format("Error while reading from BCL file for cycle %d. Offending file on disk is %s",
+                        throw new PicardException(String.format("Error while reading from BCL file for cycle %d. Offending file on disk is %s",
                                 (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()), e);
                     }
 
@@ -286,7 +290,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
         // Read the whole compressed block into a buffer, then sanity check the length
         int readBytes = this.streams[totalCycleCount].read(tileByteArray);
         if (readBytes != tileData.compressedBlockSize) {
-            throw new IOException(String.format("Error while reading from BCL file for cycle %d. Offending file on disk is %s",
+            throw new PicardException(String.format("Error while reading from BCL file for cycle %d. Offending file on disk is %s",
                     (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()));
         }
 
@@ -299,12 +303,19 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
         GZIPInputStream gzipInputStream = new GZIPInputStream(byteInputStream, uncompressedByteArray.length);
         int read;
         int totalRead = 0;
-        while ((read = gzipInputStream.read(uncompressedByteArray, totalRead, uncompressedByteArray.length - totalRead)) != -1) {
-            if (read == 0) break;
-            totalRead += read;
+        try {
+            while ((read = gzipInputStream.read(uncompressedByteArray, totalRead, uncompressedByteArray.length - totalRead)) != -1) {
+                if (read == 0) break;
+                totalRead += read;
+            }
+        } catch (EOFException eofException) {
+            throw new PicardException("Unexpected end of file " + this.streamFiles[totalCycleCount].getAbsolutePath()
+                    + " this file is likely corrupt or truncated. We have read "
+                    + totalRead + "and were expecting to read "
+                    + uncompressedByteArray.length);
         }
         if (totalRead != tileData.uncompressedBlockSize) {
-            throw new IOException(String.format("Error while decompressing from BCL file for cycle %d. Offending file on disk is %s",
+            throw new PicardException(String.format("Error while decompressing from BCL file for cycle %d. Offending file on disk is %s",
                     (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()));
         }
 
