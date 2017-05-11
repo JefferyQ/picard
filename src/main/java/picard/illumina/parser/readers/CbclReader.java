@@ -93,9 +93,10 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     private void readSurfaceTile(int tileNum) {
         log.info("Processing tile " + tileNum);
         try {
-            final ByteBuffer byteBuffer = ByteBuffer.allocate(INITIAL_HEADER_SIZE);
-            byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
             for (Map.Entry<Integer, Map<Integer, File>> entry : surfaceToTileToCbclMap.entrySet()) {
+                final ByteBuffer byteBuffer = ByteBuffer.allocate(INITIAL_HEADER_SIZE);
+                byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
                 Map<Integer, File> cycleMap = entry.getValue();
                 for (int i = 0; i < cycles; i++) {
                     //cycleMap is 1 indexed
