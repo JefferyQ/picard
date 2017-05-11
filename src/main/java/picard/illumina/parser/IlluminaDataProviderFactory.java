@@ -241,12 +241,12 @@ public class IlluminaDataProviderFactory {
      * @param minMismatchDelta
      * @param minimumBaseQuality
      */
-    public BaseIlluminaDataProvider makeDataProvider(List<File> cbcls,
-                                                     List<AbstractIlluminaPositionFileReader.PositionInfo> locsFile,
-                                                     File[] filterFiles, Map<String, BarcodeMetric> barcodesMetrics,
-                                                     int maxNoCalls, int maxMismatches, int minMismatchDelta,
-                                                     int minimumBaseQuality) {
-        return new NewIlluminaDataProvider(cbcls, locsFile, filterFiles, lane, outputMapping,
+    public NewIlluminaDataProvider makeDataProvider(List<File> cbcls,
+                                                    List<AbstractIlluminaPositionFileReader.PositionInfo> locsFile,
+                                                    File[] filterFiles, int tileNum, Map<String, BarcodeMetric> barcodesMetrics,
+                                                    int maxNoCalls, int maxMismatches, int minMismatchDelta,
+                                                    int minimumBaseQuality) {
+        return new NewIlluminaDataProvider(cbcls, locsFile, filterFiles, lane, tileNum, outputMapping,
                 false, barcodesMetrics, maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality);
     }
 

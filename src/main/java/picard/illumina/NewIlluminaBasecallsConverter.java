@@ -22,13 +22,15 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends BasecallsConverter<CLUSTER_OUTPUT_RECORD> {
     private static final Log log = Log.getInstance(NewIlluminaBasecallsConverter.class);
     private final Map<String, BarcodeMetric> barcodesMetrics = new HashMap<>();
-    final private Map<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> barcodeToRecordCollection =
-            new HashMap<>();
     private final List<File> cbcls;
     private final List<AbstractIlluminaPositionFileReader.PositionInfo> locs = new ArrayList<>();
     private final File[] filterFiles;
@@ -36,6 +38,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private final int maxMismatches;
     private final int minMismatchDelta;
     private final int minimumBaseQuality;
+    private final Map<String, List<SortingCollection<CLUSTER_OUTPUT_RECORD>>> barcodeRecords = new HashMap<>();
 
     /**
      * @param basecallsDir             Where to read basecalls from.
@@ -84,6 +87,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         this.maxMismatches = maxMismatches;
         this.minMismatchDelta = minMismatchDelta;
         this.minimumBaseQuality = minimumBaseQuality;
+        this.tiles = new ArrayList<>();
 
         barcodeRecordWriterMap.keySet().forEach(barcode -> {
             if (barcode != null)
@@ -113,8 +117,15 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         IOUtil.assertFileIsReadable(locsFile);
         //filter
 
-        filterFiles = getTiledFiles(laneDir, Pattern.compile(ParameterizedFileUtil.escapePeriods(
-                ParameterizedFileUtil.makeLaneTileRegex(".filter", lane))));
+        Pattern laneTileRegex = Pattern.compile(ParameterizedFileUtil.escapePeriods(
+                ParameterizedFileUtil.makeLaneTileRegex(".filter", lane)));
+        filterFiles = getTiledFiles(laneDir, laneTileRegex);
+        for (File filterFile : filterFiles) {
+            Matcher tileMatcher = laneTileRegex.matcher(filterFile.getName());
+            if (tileMatcher.matches()) {
+                tiles.add(Integer.valueOf(tileMatcher.group(1)));
+            }
+        }
         IOUtil.assertFilesAreReadable(Arrays.asList(filterFiles));
 
         this.factory.setApplyEamssFiltering(applyEamssFiltering);
@@ -124,62 +135,119 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         return IOUtil.getFilesMatchingRegexp(baseDirectory, pattern);
     }
 
-    public void doProcessing() {
+    void doTileProcessing() {
 
-        final BaseIlluminaDataProvider dataProvider = factory.makeDataProvider(cbcls, locs, filterFiles, barcodesMetrics,
-                maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality);
+        //thread by surface tile
+        ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
 
-        while (dataProvider.hasNext()) {
-            final ClusterData cluster = dataProvider.next();
-            readProgressLogger.record(null, 0);
-            final String barcode = (demultiplex ? cluster.getMatchedBarcode() : null);
-            addRecord(barcode, converter.convertClusterToOutputRecord(cluster));
+        for (Integer tile : tiles) {
+            executorService.submit(new TileProcessor(tile));
         }
 
-        dataProvider.close();
+        executorService.shutdown();
+
+        try {
+            while (!executorService.awaitTermination(300, TimeUnit.SECONDS)) {
+                log.debug("Waiting for thread processing to finish. " + executorService.toString());
+            }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        ExecutorService writerExecutor = Executors.newFixedThreadPool(barcodeRecordWriterMap.keySet().size());
 
         for (String barcode : barcodeRecordWriterMap.keySet()) {
-            SortingCollection<CLUSTER_OUTPUT_RECORD> recordCollection = this.barcodeToRecordCollection.get(barcode);
-            if (recordCollection == null) continue;
-            final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
+            writerExecutor.submit(new RecordWriter(barcode, this.barcodeRecords.get(barcode)));
+        }
+    }
 
-            for (CLUSTER_OUTPUT_RECORD rec : recordCollection) {
-                writer.write(rec);
-                writeProgressLogger.record(null, 0);
+    private class RecordWriter implements Runnable {
+        private final String barcode;
+        private final List<SortingCollection<CLUSTER_OUTPUT_RECORD>> recordsList;
+
+        RecordWriter(String barcode, List<SortingCollection<CLUSTER_OUTPUT_RECORD>> recordsList) {
+            this.barcode = barcode;
+            this.recordsList = recordsList;
+        }
+
+        @Override
+        public void run() {
+            final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
+            for (SortingCollection<CLUSTER_OUTPUT_RECORD> records : recordsList) {
+                for (CLUSTER_OUTPUT_RECORD rec : records) {
+                    writer.write(rec);
+                    writeProgressLogger.record(null, 0);
+                }
             }
             log.debug(String.format("Closing file for barcode %s.", barcode));
             writer.close();
         }
     }
 
-    public synchronized void addRecord(final String barcode, final CLUSTER_OUTPUT_RECORD record) {
-        // Grab the existing collection, or initialize it if it doesn't yet exist
-        SortingCollection<CLUSTER_OUTPUT_RECORD> recordCollection = this.barcodeToRecordCollection.get(barcode);
-        if (recordCollection == null) {
-            // TODO: The implementation here for supporting ignoreUnexpectedBarcodes is not efficient,
-            // but the alternative is an extensive rewrite.  We are living with the inefficiency for
-            // this special case for the time being.
-            if (!barcodeRecordWriterMap.containsKey(barcode)) {
-                if (ignoreUnexpectedBarcodes) {
-                    return;
-                }
-                throw new PicardException(String.format("Read records with barcode %s, but this barcode was not expected.  (Is it referenced in the parameters file?)", barcode));
-            }
-            recordCollection = newSortingCollection();
-            this.barcodeToRecordCollection.put(barcode, recordCollection);
+
+    private class TileProcessor implements Runnable {
+        private final int tileNum;
+        final private Map<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> barcodeToRecordCollection =
+                new HashMap<>();
+
+        TileProcessor(int tileNum) {
+            this.tileNum = tileNum;
         }
-        recordCollection.add(record);
+
+        @Override
+        public void run() {
+            final BaseIlluminaDataProvider dataProvider = factory.makeDataProvider(cbcls, locs, filterFiles, tileNum, barcodesMetrics,
+                    maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality);
+
+            while (dataProvider.hasNext()) {
+                final ClusterData cluster = dataProvider.next();
+                readProgressLogger.record(null, 0);
+                final String barcode = (demultiplex ? cluster.getMatchedBarcode() : null);
+                addRecord(barcode, converter.convertClusterToOutputRecord(cluster));
+            }
+
+            dataProvider.close();
+            for (Map.Entry<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> entry : barcodeToRecordCollection.entrySet()) {
+                if (barcodeRecords.containsKey(entry.getKey())) {
+                    barcodeRecords.get(entry.getKey()).add(entry.getValue());
+                } else {
+                    List<SortingCollection<CLUSTER_OUTPUT_RECORD>> collectionList = new ArrayList<>();
+                    collectionList.add(entry.getValue());
+                    barcodeRecords.put(entry.getKey(), collectionList);
+                }
+            }
+        }
+
+        private synchronized void addRecord(final String barcode, final CLUSTER_OUTPUT_RECORD record) {
+            // Grab the existing collection, or initialize it if it doesn't yet exist
+            SortingCollection<CLUSTER_OUTPUT_RECORD> recordCollection = this.barcodeToRecordCollection.get(barcode);
+            if (recordCollection == null) {
+                // TODO: The implementation here for supporting ignoreUnexpectedBarcodes is not efficient,
+                // but the alternative is an extensive rewrite.  We are living with the inefficiency for
+                // this special case for the time being.
+                if (!barcodeRecordWriterMap.containsKey(barcode)) {
+                    if (ignoreUnexpectedBarcodes) {
+                        return;
+                    }
+                    throw new PicardException(String.format("Read records with barcode %s, but this barcode was not expected.  (Is it referenced in the parameters file?)", barcode));
+                }
+                recordCollection = newSortingCollection();
+                this.barcodeToRecordCollection.put(barcode, recordCollection);
+            }
+            recordCollection.add(record);
+        }
+
+        private synchronized SortingCollection<CLUSTER_OUTPUT_RECORD> newSortingCollection() {
+            final int maxRecordsInRam =
+                    Math.max(1, maxReadsInRamPerTile /
+                            barcodeRecordWriterMap.size());
+            return SortingCollection.newInstance(
+                    outputRecordClass,
+                    codecPrototype.clone(),
+                    outputRecordComparator,
+                    maxRecordsInRam,
+                    tmpDirs);
+        }
     }
 
-    private synchronized SortingCollection<CLUSTER_OUTPUT_RECORD> newSortingCollection() {
-        final int maxRecordsInRam =
-                Math.max(1, maxReadsInRamPerTile /
-                        barcodeRecordWriterMap.size());
-        return SortingCollection.newInstance(
-                outputRecordClass,
-                codecPrototype.clone(),
-                outputRecordComparator,
-                maxRecordsInRam,
-                tmpDirs);
-    }
+
 }

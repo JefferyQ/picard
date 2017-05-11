@@ -63,11 +63,11 @@ import java.util.zip.GZIPInputStream;
 
 public class CbclReader extends BaseBclReader implements CloseableIterator<CbclData> {
 
-    private byte[][] cachedTiles;
-    private int[] cachedTilesPosition;
+    private byte[][] cachedTile;
+    private int[] cachedTilePosition;
 
-    private int[] currentTile;
     private int currentSurface = 1;
+    private final int tileNum;
 
     private CbclData queue = null;
 
@@ -79,91 +79,95 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     private static final int INITIAL_HEADER_SIZE = 6;
     private static final Log log = Log.getInstance(CbclReader.class);
 
-    public CbclReader(final List<File> cbcls, final Map<Integer, File> filterFileMap, final int[] outputLengths) {
+    public CbclReader(final List<File> cbcls, final Map<Integer, File> filterFileMap, final int[] outputLengths, int tileNum) {
         super(outputLengths);
         surfaceToTileToCbclMap = sortCbcls(cbcls);
-        resetCaches();
         this.filterFileMap = filterFileMap;
-
-        readSurface(1);
-    }
-
-    private void resetCaches() {
         cycleData = new CycleData[cycles];
-        cachedTiles = new byte[cycles][];
-        cachedTilesPosition = new int[cycles];
-        currentTile = new int[cycles];
+        cachedTile = new byte[cycles][];
+        cachedTilePosition = new int[cycles];
+        readSurfaceTile(tileNum);
+        this.tileNum = tileNum;
     }
 
-    private void readSurface(Integer surfaceNum) {
-        log.info("Reading surface " + surfaceNum);
+    private void readSurfaceTile(int tileNum) {
+        log.info("Processing tile " + tileNum);
         try {
             final ByteBuffer byteBuffer = ByteBuffer.allocate(INITIAL_HEADER_SIZE);
             byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-            Map<Integer, File> cycleMap = surfaceToTileToCbclMap.get(surfaceNum);
-            for (int i = 0; i < cycles; i++) {
-                currentTile[i] = 0;
-                //cycleMap is 1 indexed
-                final File bclFile = cycleMap.get(i + 1);
-                if (bclFile == null) {
-                    throw new PicardException("Expected cbcl file for surface " + surfaceNum + " cycle " + (i + 1) + " but it was not found.");
+            for (Map.Entry<Integer, Map<Integer, File>> entry : surfaceToTileToCbclMap.entrySet()) {
+                Map<Integer, File> cycleMap = entry.getValue();
+                for (int i = 0; i < cycles; i++) {
+                    //cycleMap is 1 indexed
+
+                    final File bclFile = cycleMap.get(i + 1);
+                    if (bclFile == null) {
+                        throw new PicardException("Expected cbcl file for surface " + entry.getKey() + " cycle " + (i + 1) + " but it was not found.");
+                    }
+
+                    final InputStream stream = open(bclFile, false, false, false);
+                    int read = stream.read(byteBuffer.array());
+
+                    //we need to read the first 6 bytes to determine the header size
+                    if (read != INITIAL_HEADER_SIZE) {
+                        close();
+                        throw new RuntimeIOException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
+                    }
+
+                    short version = byteBuffer.getShort();
+                    int headerSize = byteBuffer.getInt();
+
+                    final ByteBuffer headerBuffer = ByteBuffer.allocate(headerSize - INITIAL_HEADER_SIZE);
+                    headerBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+                    read = stream.read(headerBuffer.array());
+                    if (read != headerSize - INITIAL_HEADER_SIZE) {
+                        close();
+                        throw new PicardException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
+                    }
+
+                    byte bitsPerBasecall = headerBuffer.get();
+                    byte bitsPerQualityScore = headerBuffer.get();
+
+                    if (bitsPerBasecall != 2 && bitsPerBasecall != bitsPerQualityScore) {
+                        close();
+                        throw new PicardException("CBCL data not encoded in nibbles. (not currently supported)");
+                    }
+
+                    int numberOfBins = headerBuffer.getInt();
+
+                    byte[] qualityBins = new byte[numberOfBins];
+                    //each bin has a pair of 4 byte mappings
+                    for (int j = 0; j < numberOfBins; j++) {
+                        headerBuffer.getInt(); // first int is "from" value, which we don't need
+                        int to = headerBuffer.getInt();
+                        qualityBins[j] = (byte) to;
+                    }
+                    long filePos = 0;
+
+                    int numTiles = headerBuffer.getInt();
+                    TileData tileInfo = null;
+                    for (int j = 0; j < numTiles; j++) {
+                        int tile = headerBuffer.getInt();
+                        int numClustersInTile = headerBuffer.getInt();
+                        int uncompressedBlockSize = headerBuffer.getInt();
+                        int compressedBlockSize = headerBuffer.getInt();
+                        if (tile == tileNum) {
+                            tileInfo = new TileData(tile, numClustersInTile, uncompressedBlockSize, compressedBlockSize, filePos);
+                        }
+                        filePos += compressedBlockSize;
+                    }
+
+                    boolean pfExcluded = headerBuffer.get() == 1;
+                    //try the next surface if we didn't find the tile
+                    if (tileInfo == null) continue;
+
+                    cycleData[i] = new CycleData(version, headerSize, bitsPerBasecall, bitsPerQualityScore, numberOfBins, qualityBins, numTiles, tileInfo, pfExcluded);
+                    this.streams[i] = stream;
+                    this.streamFiles[i] = bclFile;
+                    byteBuffer.clear();
+                    headerBuffer.clear();
                 }
-
-                final InputStream stream = open(bclFile, false, false, false);
-                int read = stream.read(byteBuffer.array());
-
-                //we need to read the first 6 bytes to determine the header size
-                if (read != INITIAL_HEADER_SIZE) {
-                    close();
-                    throw new RuntimeIOException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
-                }
-
-                short version = byteBuffer.getShort();
-                int headerSize = byteBuffer.getInt();
-
-                final ByteBuffer headerBuffer = ByteBuffer.allocate(headerSize - INITIAL_HEADER_SIZE);
-                headerBuffer.order(ByteOrder.LITTLE_ENDIAN);
-
-                read = stream.read(headerBuffer.array());
-                if (read != headerSize - INITIAL_HEADER_SIZE) {
-                    close();
-                    throw new PicardException(String.format("BCL %s has invalid header structure.", bclFile.getAbsoluteFile()));
-                }
-
-                byte bitsPerBasecall = headerBuffer.get();
-                byte bitsPerQualityScore = headerBuffer.get();
-
-                if (bitsPerBasecall != 2 && bitsPerBasecall != bitsPerQualityScore) {
-                    close();
-                    throw new PicardException("CBCL data not encoded in nibbles. (not currently supported)");
-                }
-
-                int numberOfBins = headerBuffer.getInt();
-
-                byte[] qualityBins = new byte[numberOfBins];
-                //each bin has a pair of 4 byte mappings
-                for (int j = 0; j < numberOfBins; j++) {
-                    headerBuffer.getInt(); // first int is "from" value, which we don't need
-                    int to = headerBuffer.getInt();
-                    qualityBins[j] = (byte) to;
-                }
-
-                int numTiles = headerBuffer.getInt();
-                TileData[] tileInfo = new TileData[numTiles];
-                for (int j = 0; j < numTiles; j++) {
-                    int tileNum = headerBuffer.getInt();
-                    int numClustersInTile = headerBuffer.getInt();
-                    int uncompressedBlockSize = headerBuffer.getInt();
-                    int compressedBlockSize = headerBuffer.getInt();
-                    tileInfo[j] = new TileData(tileNum, numClustersInTile, uncompressedBlockSize, compressedBlockSize);
-                }
-
-                boolean pfExcluded = headerBuffer.get() == 1;
-                cycleData[i] = new CycleData(version, headerSize, bitsPerBasecall, bitsPerQualityScore, numberOfBins, qualityBins, numTiles, tileInfo, pfExcluded);
-                this.streams[i] = stream;
-                this.streamFiles[i] = bclFile;
-                byteBuffer.clear();
-                headerBuffer.clear();
             }
 
         } catch (final IOException ioe) {
@@ -219,15 +223,14 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
     private void advance() {
         int totalCycleCount = 0;
-        CbclData data = new CbclData(outputLengths, cycleData[totalCycleCount].tileInfo[currentTile[totalCycleCount]].tileNum);
+        CbclData data = new CbclData(outputLengths, cycleData[totalCycleCount].tileInfo.tileNum);
 
         for (int read = 0; read < outputLengths.length; read++) {
             for (int cycle = 0; cycle < outputLengths[read]; cycle++) {
-                try {
                     CycleData currentCycleData = cycleData[totalCycleCount];
-                    TileData currentTileData = currentCycleData.tileInfo[currentTile[totalCycleCount]];
+                TileData currentTileData = currentCycleData.tileInfo;
                     try {
-                        if (cachedTiles[totalCycleCount] == null) {
+                        if (cachedTile[totalCycleCount] == null) {
                             if (!cachedFilter.containsKey(currentTileData.tileNum) && !currentCycleData.pfExcluded) {
                                 cacheFilter(currentTileData);
                             }
@@ -239,35 +242,16 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                                 (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()), e);
                     }
 
-                    if (cachedTilesPosition[totalCycleCount] >= cachedTiles[totalCycleCount].length) {
-                        //on to the next tile
-                        currentTile[totalCycleCount]++;
-                        //if past the last tile then go to the next surface
-                        if (currentTile[totalCycleCount] > currentCycleData.tileInfo.length - 1) {
-                            if (currentSurface < surfaceToTileToCbclMap.size()) {
-                                resetCaches();
-                                readSurface(++currentSurface);
-                                currentCycleData = cycleData[totalCycleCount];
-                            } else {
-                                return;
-                            }
-                        }
-                        currentTileData = currentCycleData.tileInfo[currentTile[totalCycleCount]];
-                        if (!cachedFilter.containsKey(currentTileData.tileNum) && !currentCycleData.pfExcluded) {
-                            cacheFilter(currentTileData);
-                        }
-                        cacheTile(totalCycleCount, currentTileData, currentCycleData);
+                if (cachedTilePosition[totalCycleCount] >= cachedTile[totalCycleCount].length) {
+                    // end of tile
+                    return;
                     }
 
-                    int singleByte = cachedTiles[totalCycleCount][cachedTilesPosition[totalCycleCount]++];
+                int singleByte = cachedTile[totalCycleCount][cachedTilePosition[totalCycleCount]++];
 
                     decodeQualityBinnedBasecall(data, read, cycle, singleByte, currentCycleData);
 
                     totalCycleCount++;
-                } catch (final IOException ioe) {
-                    throw new PicardException(ioe.getMessage());
-                }
-
             }
         }
         this.queue = data;
@@ -292,7 +276,13 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
         byte[] unNibbledByteArray = new byte[tileData.uncompressedBlockSize * 2];
 
         // Read the whole compressed block into a buffer, then sanity check the length
-        int readBytes = this.streams[totalCycleCount].read(tileByteArray);
+        InputStream stream = this.streams[totalCycleCount];
+        long dataLeft = tileData.filePosition - stream.skip(tileData.filePosition);
+        while (dataLeft > 0) {
+            dataLeft -= stream.skip(dataLeft);
+        }
+
+        int readBytes = stream.read(tileByteArray);
         if (readBytes != tileData.compressedBlockSize) {
             throw new PicardException(String.format("Error while reading from BCL file for cycle %d. Offending file on disk is %s",
                     (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()));
@@ -300,10 +290,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
         // Uncompress the data from the buffer we just wrote - use gzip input stream to write to uncompressed buffer
         ByteArrayInputStream byteInputStream = new ByteArrayInputStream(Arrays.copyOfRange(tileByteArray, 0, readBytes));
-        if (cachedTiles[totalCycleCount] != null) {
-            //clear the old cache
-            cachedTiles[totalCycleCount] = null;
-        }
+
         GZIPInputStream gzipInputStream = new GZIPInputStream(byteInputStream, uncompressedByteArray.length);
         int read;
         int totalRead = 0;
@@ -350,10 +337,10 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                     i++;
                 }
             }
-            cachedTiles[totalCycleCount] = filteredByteArray;
+            cachedTile[totalCycleCount] = filteredByteArray;
         } else {
-            cachedTiles[totalCycleCount] = unNibbledByteArray;
+            cachedTile[totalCycleCount] = unNibbledByteArray;
         }
-        cachedTilesPosition[totalCycleCount] = 0;
+        cachedTilePosition[totalCycleCount] = 0;
     }
 }

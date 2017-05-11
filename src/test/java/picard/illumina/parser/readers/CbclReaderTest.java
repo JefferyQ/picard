@@ -30,7 +30,7 @@ public class CbclReaderTest {
         Map<Integer, File> filters = new HashMap<>();
         filters.put(1101, TILE_1101_FILTER);
         filters.put(1102, TILE_1102_FILTER);
-        final CbclReader reader = new CbclReader(Arrays.asList(PASSING_CBCL_C99_1, PASSING_CBCL_C100_1), filters, new int[]{2});
+        final CbclReader reader = new CbclReader(Arrays.asList(PASSING_CBCL_C99_1, PASSING_CBCL_C100_1), filters, new int[]{2}, 1101);
 
 
         int i = 0;

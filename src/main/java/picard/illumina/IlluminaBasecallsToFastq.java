@@ -228,7 +228,7 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
     protected int doWork() {
         initialize();
         if (USE_NEW_CONVERTER) {
-            newBasecallsConverter.doProcessing();
+            newBasecallsConverter.doTileProcessing();
         } else {
             basecallsConverter.doTileProcessing();
         }

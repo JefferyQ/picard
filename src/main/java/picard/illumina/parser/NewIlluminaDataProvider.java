@@ -16,19 +16,17 @@ import java.util.regex.Pattern;
 
 public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
     private final List<AbstractIlluminaPositionFileReader.PositionInfo> locs;
-    private Iterator<AbstractIlluminaPositionFileReader.PositionInfo> locsIterator;
     private final CbclReader reader;
     private final ReadStructure outputReadStructure;
     private final boolean usingQualityScores;
     private final Map<String, BarcodeMetric> barcodeMetricMap;
-    private int currentTile;
     private final int maxNoCalls;
     private final int maxMismatches;
     private final int minMismatchDelta;
     private final int minimumBaseQuality;
 
     NewIlluminaDataProvider(final List<File> cbcls, final List<AbstractIlluminaPositionFileReader.PositionInfo> locs,
-                            final File[] filterFiles, final int lane, final OutputMapping outputMapping,
+                            final File[] filterFiles, final int lane, final int tileNum, final OutputMapping outputMapping,
                             boolean usingQualityScores, final Map<String, BarcodeMetric> barcodesMetrics,
                             int maxNoCalls, int maxMismatches, int minMismatchDelta, int minimumBaseQuality) {
         super(lane, outputMapping);
@@ -43,7 +41,7 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
         for (File filterFile : filterFiles) {
             filterFileMap.put(fileToTile(filterFile.getName()), filterFile);
         }
-        this.reader = new CbclReader(cbcls, filterFileMap, outputMapping.getOutputReadLengths());
+        this.reader = new CbclReader(cbcls, filterFileMap, outputMapping.getOutputReadLengths(), tileNum);
         this.outputReadStructure = outputMapping.getOutputReadStructure();
     }
 
@@ -66,11 +64,10 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
     public ClusterData next() {
         CbclData cbclData = reader.next();
 
-        //new tile.. reset locs iterator
-        if (currentTile != cbclData.getTile()) {
-            currentTile = cbclData.getTile();
-            locsIterator = locs.iterator();
-        }
+        if (cbclData == null) return null;
+
+        Iterator<AbstractIlluminaPositionFileReader.PositionInfo> locsIterator = locs.iterator();
+
         AbstractIlluminaPositionFileReader.PositionInfo positionInfo = locsIterator.next();
 
         final ClusterData cluster = new ClusterData(outputReadTypes);
