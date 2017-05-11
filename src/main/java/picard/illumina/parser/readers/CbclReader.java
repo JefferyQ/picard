@@ -66,9 +66,6 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     private byte[][] cachedTile;
     private int[] cachedTilePosition;
 
-    private int currentSurface = 1;
-    private final int tileNum;
-
     private CbclData queue = null;
 
     private CycleData[] cycleData;
@@ -87,7 +84,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
         cachedTile = new byte[cycles][];
         cachedTilePosition = new int[cycles];
         readSurfaceTile(tileNum);
-        this.tileNum = tileNum;
+        close();
     }
 
     private void readSurfaceTile(int tileNum) {
@@ -169,6 +166,30 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                     headerBuffer.clear();
                 }
             }
+            int totalCycleCount = 0;
+
+            if (cycleData[totalCycleCount].tileInfo == null) {
+                throw new PicardException("Could not find tile " + cycleData[totalCycleCount].tileInfo);
+            }
+
+            for (int outputLength : outputLengths) {
+                for (int cycle = 0; cycle < outputLength; cycle++) {
+                    CycleData currentCycleData = cycleData[totalCycleCount];
+                    try {
+                        if (cachedTile[totalCycleCount] == null) {
+                            if (!cachedFilter.containsKey(cycleData[totalCycleCount].tileInfo.tileNum) && !currentCycleData.pfExcluded) {
+                                cacheFilter(cycleData[totalCycleCount].tileInfo);
+                            }
+                            cacheTile(totalCycleCount, cycleData[totalCycleCount].tileInfo, currentCycleData);
+                        }
+                    } catch (IOException e) {
+                        // when logging the error, increment cycle by 1, since totalCycleCount is zero-indexed but Illumina directories are 1-indexed.
+                        throw new PicardException(String.format("Error while reading from BCL file for cycle %d. Offending file on disk is %s",
+                                (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()), e);
+                    }
+                    totalCycleCount++;
+                }
+            }
 
         } catch (final IOException ioe) {
             throw new RuntimeIOException(ioe);
@@ -227,31 +248,18 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
 
         for (int read = 0; read < outputLengths.length; read++) {
             for (int cycle = 0; cycle < outputLengths[read]; cycle++) {
-                    CycleData currentCycleData = cycleData[totalCycleCount];
-                TileData currentTileData = currentCycleData.tileInfo;
-                    try {
-                        if (cachedTile[totalCycleCount] == null) {
-                            if (!cachedFilter.containsKey(currentTileData.tileNum) && !currentCycleData.pfExcluded) {
-                                cacheFilter(currentTileData);
-                            }
-                            cacheTile(totalCycleCount, currentTileData, currentCycleData);
-                        }
-                    } catch (IOException e) {
-                        // when logging the error, increment cycle by 1, since totalCycleCount is zero-indexed but Illumina directories are 1-indexed.
-                        throw new PicardException(String.format("Error while reading from BCL file for cycle %d. Offending file on disk is %s",
-                                (totalCycleCount + 1), this.streamFiles[totalCycleCount].getAbsolutePath()), e);
-                    }
+                CycleData currentCycleData = cycleData[totalCycleCount];
 
                 if (cachedTilePosition[totalCycleCount] >= cachedTile[totalCycleCount].length) {
                     // end of tile
                     return;
-                    }
+                }
 
                 int singleByte = cachedTile[totalCycleCount][cachedTilePosition[totalCycleCount]++];
 
-                    decodeQualityBinnedBasecall(data, read, cycle, singleByte, currentCycleData);
+                decodeQualityBinnedBasecall(data, read, cycle, singleByte, currentCycleData);
 
-                    totalCycleCount++;
+                totalCycleCount++;
             }
         }
         this.queue = data;

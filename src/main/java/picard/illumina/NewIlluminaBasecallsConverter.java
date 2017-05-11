@@ -232,6 +232,9 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
             }
 
             dataProvider.close();
+            //we are done adding records
+            this.barcodeToRecordCollection.values().forEach(SortingCollection::doneAdding);
+
             for (Map.Entry<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> entry : barcodeToRecordCollection.entrySet()) {
                 if (barcodeRecords.containsKey(entry.getKey())) {
                     barcodeRecords.get(entry.getKey()).add(entry.getValue());

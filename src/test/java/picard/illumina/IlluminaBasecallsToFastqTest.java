@@ -177,7 +177,8 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
                     "MULTIPLEX_PARAMS=" + libraryParams,
                     "MACHINE_NAME=machine1",
                     "FLOWCELL_BARCODE=abcdeACXX",
-                    "USE_NEW_CONVERTER=true"
+                    "USE_NEW_CONVERTER=true",
+                    "NUM_PROCESSORS=4"
             });
 
             final ReadStructure readStructure = new ReadStructure(readStructureString);
