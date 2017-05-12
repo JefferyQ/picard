@@ -169,9 +169,12 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         for (Integer tile : tiles) {
             executorService.submit(new TileProcessor(tile));
-            //stagger by 30 seconds to avoid all threads hitting the same file at once.
+            //stagger by 30 seconds to avoid all threads hitting the same file at once. Once the thread pool is full
+            //we can submit faster
             try {
-                Thread.sleep(FIFTEEN_SECONDS);
+                if (executorService.getMaximumPoolSize() > executorService.getActiveCount()) {
+                    Thread.sleep(FIFTEEN_SECONDS);
+                }
             } catch (InterruptedException e) {
                 throw new PicardException("Interrupted during submit sleep.", e);
             }
