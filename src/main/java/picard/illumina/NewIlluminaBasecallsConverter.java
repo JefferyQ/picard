@@ -144,11 +144,9 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     void doTileProcessing() {
 
         //thread by surface tile
-        ExecutorService executorService = new ThreadPoolExecutor(numThreads, numThreads, 0, TimeUnit.SECONDS, new LinkedBlockingDeque<>()) {
+        ThreadPoolExecutor executorService = new ThreadPoolExecutor(numThreads, numThreads, 0, TimeUnit.SECONDS, new LinkedBlockingDeque<>()) {
             @Override
             protected void afterExecute(Runnable r, Throwable t) {
-                TileProcessor tileProcessor = (TileProcessor) r;
-                log.info("Finished processing tile " + tileProcessor.tileNum);
                 if (t == null && r instanceof Future<?>) {
                     try {
                         Future<?> future = (Future<?>) r;
@@ -183,7 +181,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         try {
             while (!executorService.awaitTermination(300, TimeUnit.SECONDS)) {
-                log.debug("Waiting for thread processing to finish. " + executorService.toString());
+                log.info(String.format("Waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d",
+                        executorService.getCompletedTaskCount(), executorService.getActiveCount(), executorService.getQueue().size()));
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
@@ -253,6 +252,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     barcodeRecords.put(entry.getKey(), collectionList);
                 }
             }
+            log.info("Finished processing tile " + tileNum);
         }
 
         private synchronized void addRecord(final String barcode, final CLUSTER_OUTPUT_RECORD record) {
