@@ -35,6 +35,7 @@ import java.util.regex.Pattern;
 
 public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends BasecallsConverter<CLUSTER_OUTPUT_RECORD> {
     private static final Log log = Log.getInstance(NewIlluminaBasecallsConverter.class);
+    private static final long THIRTY_SECONDS = 30 * 1000;
     private final Map<String, BarcodeMetric> barcodesMetrics = new HashMap<>();
     private final List<File> cbcls;
     private final List<AbstractIlluminaPositionFileReader.PositionInfo> locs = new ArrayList<>();
@@ -168,6 +169,12 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         for (Integer tile : tiles) {
             executorService.submit(new TileProcessor(tile));
+            //stagger by 30 seconds to avoid all threads hitting the same file at once.
+            try {
+                Thread.sleep(THIRTY_SECONDS);
+            } catch (InterruptedException e) {
+                throw new PicardException("Interrupted during submit sleep.", e);
+            }
         }
 
         executorService.shutdown();
