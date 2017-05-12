@@ -186,21 +186,7 @@ public class IlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Basecalls
         // Since the first non-fixed part of the read name is the tile number, without preceding zeroes,
         // and the output is sorted by read name, process the tiles in this order.
         Collections.sort(tiles, TILE_NUMBER_COMPARATOR);
-        if (firstTile != null) {
-            int i;
-            for (i = 0; i < tiles.size(); ++i) {
-                if (tiles.get(i).intValue() == firstTile.intValue()) {
-                    tiles = tiles.subList(i, tiles.size());
-                    break;
-                }
-            }
-            if (tiles.get(0).intValue() != firstTile.intValue()) {
-                throw new PicardException("firstTile=" + firstTile + ", but that tile was not found.");
-            }
-        }
-        if (tileLimit != null && tiles.size() > tileLimit) {
-            tiles = tiles.subList(0, tileLimit);
-        }
+        setTileLimits(firstTile, tileLimit);
 
         this.numThreads = Math.max(1, Math.min(this.numThreads, tiles.size()));
         // If we're forcing garbage collection, collect every 5 minutes in a daemon thread.

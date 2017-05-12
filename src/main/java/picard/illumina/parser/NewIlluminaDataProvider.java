@@ -15,7 +15,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
-    private final List<AbstractIlluminaPositionFileReader.PositionInfo> locs;
     private final CbclReader reader;
     private final ReadStructure outputReadStructure;
     private final boolean usingQualityScores;
@@ -24,13 +23,13 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
     private final int maxMismatches;
     private final int minMismatchDelta;
     private final int minimumBaseQuality;
+    private final Iterator<AbstractIlluminaPositionFileReader.PositionInfo> locsIterator;
 
     NewIlluminaDataProvider(final List<File> cbcls, final List<AbstractIlluminaPositionFileReader.PositionInfo> locs,
                             final File[] filterFiles, final int lane, final int tileNum, final OutputMapping outputMapping,
                             boolean usingQualityScores, final Map<String, BarcodeMetric> barcodesMetrics,
                             int maxNoCalls, int maxMismatches, int minMismatchDelta, int minimumBaseQuality) {
         super(lane, outputMapping);
-        this.locs = locs;
         this.usingQualityScores = usingQualityScores;
         this.barcodeMetricMap = barcodesMetrics;
         this.maxNoCalls = maxNoCalls;
@@ -43,6 +42,7 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
         }
         this.reader = new CbclReader(cbcls, filterFileMap, outputMapping.getOutputReadLengths(), tileNum);
         this.outputReadStructure = outputMapping.getOutputReadStructure();
+        this.locsIterator = locs.iterator();
     }
 
     @Override
@@ -65,8 +65,6 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
         CbclData cbclData = reader.next();
 
         if (cbclData == null) return null;
-
-        Iterator<AbstractIlluminaPositionFileReader.PositionInfo> locsIterator = locs.iterator();
 
         AbstractIlluminaPositionFileReader.PositionInfo positionInfo = locsIterator.next();
 

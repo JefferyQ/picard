@@ -3,6 +3,7 @@ package picard.illumina;
 import htsjdk.samtools.util.Log;
 import htsjdk.samtools.util.ProgressLogger;
 import htsjdk.samtools.util.SortingCollection;
+import picard.PicardException;
 import picard.illumina.parser.ClusterData;
 import picard.illumina.parser.IlluminaDataProviderFactory;
 import picard.illumina.parser.readers.BclQualityEvaluationStrategy;
@@ -78,6 +79,24 @@ abstract class BasecallsConverter<CLUSTER_OUTPUT_RECORD> {
      */
     public void setConverter(final ClusterDataConverter<CLUSTER_OUTPUT_RECORD> converter) {
         this.converter = converter;
+    }
+
+    protected void setTileLimits(Integer firstTile, Integer tileLimit) {
+        if (firstTile != null) {
+            int i;
+            for (i = 0; i < tiles.size(); ++i) {
+                if (tiles.get(i).intValue() == firstTile.intValue()) {
+                    tiles = tiles.subList(i, tiles.size());
+                    break;
+                }
+            }
+            if (tiles.get(0).intValue() != firstTile.intValue()) {
+                throw new PicardException("firstTile=" + firstTile + ", but that tile was not found.");
+            }
+        }
+        if (tileLimit != null && tiles.size() > tileLimit) {
+            tiles = tiles.subList(0, tileLimit);
+        }
     }
 
     interface ClusterDataConverter<OUTPUT_RECORD> {

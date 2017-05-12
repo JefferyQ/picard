@@ -22,10 +22,9 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -44,7 +43,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private final int maxMismatches;
     private final int minMismatchDelta;
     private final int minimumBaseQuality;
-    private final Map<String, List<SortingCollection<CLUSTER_OUTPUT_RECORD>>> barcodeRecords = new HashMap<>();
+    private final Map<String, Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>>> barcodeRecords = new HashMap<>();
 
     /**
      * @param basecallsDir             Where to read basecalls from.
@@ -133,8 +132,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
             }
         }
         IOUtil.assertFilesAreReadable(Arrays.asList(filterFiles));
+        tiles.sort(TILE_NUMBER_COMPARATOR);
 
         this.factory.setApplyEamssFiltering(applyEamssFiltering);
+        setTileLimits(firstTile, tileLimit);
     }
 
     private File[] getTiledFiles(File baseDirectory, Pattern pattern) {
@@ -144,28 +145,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     void doTileProcessing() {
 
         //thread by surface tile
-        ThreadPoolExecutor executorService = new ThreadPoolExecutor(numThreads, numThreads, 0, TimeUnit.SECONDS, new LinkedBlockingDeque<>()) {
-            @Override
-            protected void afterExecute(Runnable r, Throwable t) {
-                if (t == null && r instanceof Future<?>) {
-                    try {
-                        Future<?> future = (Future<?>) r;
-                        if (future.isDone()) {
-                            future.get();
-                        }
-                    } catch (CancellationException ce) {
-                        t = ce;
-                    } catch (ExecutionException ee) {
-                        t = ee.getCause();
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt(); // ignore/reset
-                    }
-                }
-                if (t != null) {
-                    throw new PicardException(t.getMessage(), t);
-                }
-            }
-        };
+        ThreadPoolExecutor executorService = new ThreadPoolExecutorWithExceptions(numThreads);
 
         for (Integer tile : tiles) {
             executorService.submit(new TileProcessor(tile));
@@ -182,6 +162,20 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         executorService.shutdown();
 
+        awaitThreadPoolTermination(executorService);
+
+        ThreadPoolExecutor writerExecutor = new ThreadPoolExecutorWithExceptions(barcodeRecordWriterMap.keySet().size());
+
+        for (String barcode : barcodeRecordWriterMap.keySet()) {
+            writerExecutor.submit(new RecordWriter(barcode, this.barcodeRecords.get(barcode)));
+        }
+
+        writerExecutor.shutdown();
+
+        awaitThreadPoolTermination(writerExecutor);
+    }
+
+    private void awaitThreadPoolTermination(ThreadPoolExecutor executorService) {
         try {
             while (!executorService.awaitTermination(300, TimeUnit.SECONDS)) {
                 log.info(String.format("Waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d",
@@ -190,18 +184,13 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        ExecutorService writerExecutor = Executors.newFixedThreadPool(barcodeRecordWriterMap.keySet().size());
-
-        for (String barcode : barcodeRecordWriterMap.keySet()) {
-            writerExecutor.submit(new RecordWriter(barcode, this.barcodeRecords.get(barcode)));
-        }
     }
 
     private class RecordWriter implements Runnable {
         private final String barcode;
-        private final List<SortingCollection<CLUSTER_OUTPUT_RECORD>> recordsList;
+        private final Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>> recordsList;
 
-        RecordWriter(String barcode, List<SortingCollection<CLUSTER_OUTPUT_RECORD>> recordsList) {
+        RecordWriter(String barcode, Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>> recordsList) {
             this.barcode = barcode;
             this.recordsList = recordsList;
         }
@@ -209,13 +198,13 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         @Override
         public void run() {
             final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
-            for (SortingCollection<CLUSTER_OUTPUT_RECORD> records : recordsList) {
+            for (SortingCollection<CLUSTER_OUTPUT_RECORD> records : recordsList.values()) {
                 for (CLUSTER_OUTPUT_RECORD rec : records) {
                     writer.write(rec);
                     writeProgressLogger.record(null, 0);
                 }
             }
-            log.debug(String.format("Closing file for barcode %s.", barcode));
+            log.info(String.format("Closing file for barcode %s.", barcode));
             writer.close();
         }
     }
@@ -248,10 +237,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
             for (Map.Entry<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> entry : barcodeToRecordCollection.entrySet()) {
                 if (barcodeRecords.containsKey(entry.getKey())) {
-                    barcodeRecords.get(entry.getKey()).add(entry.getValue());
+                    barcodeRecords.get(entry.getKey()).put(tileNum, entry.getValue());
                 } else {
-                    List<SortingCollection<CLUSTER_OUTPUT_RECORD>> collectionList = new ArrayList<>();
-                    collectionList.add(entry.getValue());
+                    Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>> collectionList = new TreeMap<>();
+                    collectionList.put(tileNum, entry.getValue());
                     barcodeRecords.put(entry.getKey(), collectionList);
                 }
             }
@@ -292,4 +281,30 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     }
 
 
+    private class ThreadPoolExecutorWithExceptions extends ThreadPoolExecutor {
+        ThreadPoolExecutorWithExceptions(int threads) {
+            super(threads, threads, 0, TimeUnit.SECONDS, new LinkedBlockingDeque<>());
+        }
+
+        @Override
+        protected void afterExecute(Runnable r, Throwable t) {
+            if (t == null && r instanceof Future<?>) {
+                try {
+                    Future<?> future = (Future<?>) r;
+                    if (future.isDone()) {
+                        future.get();
+                    }
+                } catch (CancellationException ce) {
+                    t = ce;
+                } catch (ExecutionException ee) {
+                    t = ee.getCause();
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt(); // ignore/reset
+                }
+            }
+            if (t != null) {
+                throw new PicardException(t.getMessage(), t);
+            }
+        }
+    }
 }

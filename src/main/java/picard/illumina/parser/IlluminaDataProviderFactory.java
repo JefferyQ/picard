@@ -233,7 +233,6 @@ public class IlluminaDataProviderFactory {
     /**
      * Call this method to create a ClusterData iterator over all clusters for all tiles in ascending numeric order.
      * @param cbcls
-     * @param locsFile
      * @param filterFiles
      * @param barcodesMetrics
      * @param maxNoCalls
@@ -242,11 +241,11 @@ public class IlluminaDataProviderFactory {
      * @param minimumBaseQuality
      */
     public NewIlluminaDataProvider makeDataProvider(List<File> cbcls,
-                                                    List<AbstractIlluminaPositionFileReader.PositionInfo> locsFile,
+                                                    List<AbstractIlluminaPositionFileReader.PositionInfo> locs,
                                                     File[] filterFiles, int tileNum, Map<String, BarcodeMetric> barcodesMetrics,
                                                     int maxNoCalls, int maxMismatches, int minMismatchDelta,
                                                     int minimumBaseQuality) {
-        return new NewIlluminaDataProvider(cbcls, locsFile, filterFiles, lane, tileNum, outputMapping,
+        return new NewIlluminaDataProvider(cbcls, locs, filterFiles, lane, tileNum, outputMapping,
                 false, barcodesMetrics, maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality);
     }
 
