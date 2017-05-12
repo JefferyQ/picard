@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
 
 public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends BasecallsConverter<CLUSTER_OUTPUT_RECORD> {
     private static final Log log = Log.getInstance(NewIlluminaBasecallsConverter.class);
-    private static final long FIFTEEN_SECONDS = 15 * 1000;
+    private static final long TEN_SECONDS = 10 * 1000;
     private final Map<String, BarcodeMetric> barcodesMetrics = new HashMap<>();
     private final List<File> cbcls;
     private final List<AbstractIlluminaPositionFileReader.PositionInfo> locs = new ArrayList<>();
@@ -173,7 +173,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
             //we can submit faster
             try {
                 if (executorService.getMaximumPoolSize() > executorService.getActiveCount()) {
-                    Thread.sleep(FIFTEEN_SECONDS);
+                    Thread.sleep(TEN_SECONDS);
                 }
             } catch (InterruptedException e) {
                 throw new PicardException("Interrupted during submit sleep.", e);
