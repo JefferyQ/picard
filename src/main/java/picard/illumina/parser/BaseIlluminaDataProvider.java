@@ -1,7 +1,5 @@
 package picard.illumina.parser;
 
-import picard.illumina.parser.readers.AbstractIlluminaPositionFileReader;
-
 import java.util.Iterator;
 
 public abstract class BaseIlluminaDataProvider implements Iterator<ClusterData>, Iterable<ClusterData> {
@@ -61,7 +59,7 @@ public abstract class BaseIlluminaDataProvider implements Iterator<ClusterData>,
         }
     }
 
-    protected void addReadData(final ClusterData clusterData, final int numReads, final CbclData cbclData, AbstractIlluminaPositionFileReader.PositionInfo positionInfo) {
+    protected void addReadData(final ClusterData clusterData, final int numReads, final CbclData cbclData) {
         final byte[][] bases = cbclData.getBases();
         for (int i = 0; i < numReads; i++) {
             clusterData.getRead(i).setBases(bases[i]);
@@ -71,8 +69,8 @@ public abstract class BaseIlluminaDataProvider implements Iterator<ClusterData>,
             clusterData.getRead(i).setQualities(qualities[i]);
         }
         clusterData.setPf(cbclData.isPf());
-        clusterData.setX(positionInfo.xQseqCoord);
-        clusterData.setY(positionInfo.yQseqCoord);
+        clusterData.setX(cbclData.getPositionInfo().xQseqCoord);
+        clusterData.setY(cbclData.getPositionInfo().yQseqCoord);
     }
 
     abstract void seekToTile(int seekAfterFirstRead);

@@ -1,7 +1,10 @@
 package picard.illumina.parser;
 
+import picard.illumina.parser.readers.AbstractIlluminaPositionFileReader;
+
 public class CbclData extends BclData implements PfData {
     private final int tile;
+    private AbstractIlluminaPositionFileReader.PositionInfo positionInfo;
 
     public CbclData(int[] outputLengths, int tile) {
         super(outputLengths);
@@ -16,5 +19,13 @@ public class CbclData extends BclData implements PfData {
 
     public int getTile() {
         return tile;
+    }
+
+    public AbstractIlluminaPositionFileReader.PositionInfo getPositionInfo() {
+        return positionInfo;
+    }
+
+    public void setPositionInfo(AbstractIlluminaPositionFileReader.PositionInfo positionInfo) {
+        this.positionInfo = positionInfo;
     }
 }

@@ -14,8 +14,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -67,6 +69,7 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     private int[] cachedTilePosition;
 
     private CbclData queue = null;
+    private Iterator<AbstractIlluminaPositionFileReader.PositionInfo> positionInfoIterator;
 
     private CycleData[] cycleData;
     private final Map<Integer, File> filterFileMap;
@@ -76,18 +79,18 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
     private static final int INITIAL_HEADER_SIZE = 6;
     private static final Log log = Log.getInstance(CbclReader.class);
 
-    public CbclReader(final List<File> cbcls, final Map<Integer, File> filterFileMap, final int[] outputLengths, int tileNum) {
+    public CbclReader(final List<File> cbcls, final Map<Integer, File> filterFileMap, final int[] outputLengths, int tileNum, List<AbstractIlluminaPositionFileReader.PositionInfo> locs) {
         super(outputLengths);
         surfaceToTileToCbclMap = sortCbcls(cbcls);
         this.filterFileMap = filterFileMap;
         cycleData = new CycleData[cycles];
         cachedTile = new byte[cycles][];
         cachedTilePosition = new int[cycles];
-        readSurfaceTile(tileNum);
+        readSurfaceTile(tileNum, locs);
         close();
     }
 
-    private void readSurfaceTile(int tileNum) {
+    private void readSurfaceTile(int tileNum, List<AbstractIlluminaPositionFileReader.PositionInfo> locs) {
         log.info("Processing tile " + tileNum);
         try {
             for (Map.Entry<Integer, Map<Integer, File>> entry : surfaceToTileToCbclMap.entrySet()) {
@@ -177,8 +180,8 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                     CycleData currentCycleData = cycleData[totalCycleCount];
                     try {
                         if (cachedTile[totalCycleCount] == null) {
-                            if (!cachedFilter.containsKey(cycleData[totalCycleCount].tileInfo.tileNum) && !currentCycleData.pfExcluded) {
-                                cacheFilter(cycleData[totalCycleCount].tileInfo);
+                            if (!cachedFilter.containsKey(cycleData[totalCycleCount].tileInfo.tileNum)) {
+                                cacheFilterAndLocs(cycleData[totalCycleCount].tileInfo, locs);
                             }
                             cacheTile(totalCycleCount, cycleData[totalCycleCount].tileInfo, currentCycleData);
                         }
@@ -262,17 +265,28 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                 totalCycleCount++;
             }
         }
+        data.setPositionInfo(positionInfoIterator.next());
         this.queue = data;
     }
 
-    private void cacheFilter(TileData currentTileData) {
+    private void cacheFilterAndLocs(TileData currentTileData, List<AbstractIlluminaPositionFileReader.PositionInfo> locs) {
         boolean[] filterValues = new boolean[currentTileData.numClustersInTile];
         FilterFileReader reader = new FilterFileReader(filterFileMap.get(currentTileData.tileNum));
+        Iterator<AbstractIlluminaPositionFileReader.PositionInfo> positionInfoIterator = locs.iterator();
         int count = 0;
         while (reader.hasNext()) {
             filterValues[count] = reader.next();
             count++;
         }
+
+        List<AbstractIlluminaPositionFileReader.PositionInfo> positionInfos = new ArrayList<>();
+        for (boolean filterValue : filterValues) {
+            AbstractIlluminaPositionFileReader.PositionInfo info = positionInfoIterator.next();
+            if (filterValue) {
+                positionInfos.add(info);
+            }
+        }
+        this.positionInfoIterator = positionInfos.iterator();
         cachedFilter.put(currentTileData.tileNum, filterValues);
     }
 

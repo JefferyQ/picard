@@ -40,7 +40,7 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
         for (File filterFile : filterFiles) {
             filterFileMap.put(fileToTile(filterFile.getName()), filterFile);
         }
-        this.reader = new CbclReader(cbcls, filterFileMap, outputMapping.getOutputReadLengths(), tileNum);
+        this.reader = new CbclReader(cbcls, filterFileMap, outputMapping.getOutputReadLengths(), tileNum, locs);
         this.outputReadStructure = outputMapping.getOutputReadStructure();
         this.locsIterator = locs.iterator();
     }
@@ -66,14 +66,14 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
 
         if (cbclData == null) return null;
 
-        AbstractIlluminaPositionFileReader.PositionInfo positionInfo = locsIterator.next();
+        //       AbstractIlluminaPositionFileReader.PositionInfo positionInfo = locsIterator.next();
 
         final ClusterData cluster = new ClusterData(outputReadTypes);
         cluster.setLane(lane);
         cluster.setTile(cbclData.getTile());
 
         final int[] barcodeIndices = outputReadStructure.sampleBarcodes.getIndices();
-        addReadData(cluster, numReads, cbclData, positionInfo);
+        addReadData(cluster, numReads, cbclData);
 
         final byte[][] barcodeSubsequences = new byte[barcodeIndices.length][];
         final byte[][] qualityScores = usingQualityScores ? new byte[barcodeIndices.length][] : null;
