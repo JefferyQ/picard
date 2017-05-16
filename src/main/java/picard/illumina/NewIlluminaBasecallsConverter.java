@@ -198,10 +198,12 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         @Override
         public void run() {
             final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
-            for (SortingCollection<CLUSTER_OUTPUT_RECORD> records : recordsList.values()) {
-                for (CLUSTER_OUTPUT_RECORD rec : records) {
-                    writer.write(rec);
-                    writeProgressLogger.record(null, 0);
+            if (recordsList != null) {
+                for (SortingCollection<CLUSTER_OUTPUT_RECORD> records : recordsList.values()) {
+                    for (CLUSTER_OUTPUT_RECORD rec : records) {
+                        writer.write(rec);
+                        writeProgressLogger.record(null, 0);
+                    }
                 }
             }
             log.info(String.format("Closing file for barcode %s.", barcode));

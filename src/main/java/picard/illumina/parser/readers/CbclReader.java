@@ -351,13 +351,15 @@ public class CbclReader extends BaseBclReader implements CloseableIterator<CbclD
                 sum += b ? 1 : 0;
             }
             byte[] filteredByteArray = new byte[sum];
-            int i = 0;
+            int filterIndex = 0;
+            int basecallIndex = 0;
             for (boolean filterData : filterDatas) {
-                byte readByte = unNibbledByteArray[i];
+                byte readByte = unNibbledByteArray[filterIndex];
                 if (filterData) {
-                    filteredByteArray[i] = readByte;
-                    i++;
+                    filteredByteArray[basecallIndex] = readByte;
+                    basecallIndex++;
                 }
+                filterIndex++;
             }
             cachedTile[totalCycleCount] = filteredByteArray;
         } else {
