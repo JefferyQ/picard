@@ -210,7 +210,7 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
     @Option(doc = "Maximum allowable number of no-calls in a barcode read before it is considered unmatchable.")
     public int MAX_NO_CALLS = 2;
 
-    @Option(doc = "Per-barcode and per-lane metrics written to this file.", shortName = StandardOptionDefinitions.METRICS_FILE_SHORT_NAME)
+    @Option(doc = "Per-barcode and per-lane metrics written to this file.", shortName = StandardOptionDefinitions.METRICS_FILE_SHORT_NAME, optional = true)
     public File METRICS_FILE;
 
     /** Simple switch to control the read name format to emit. */
@@ -285,6 +285,12 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
         }
         final int readsPerCluster = readStructure.templates.length() + readStructure.sampleBarcodes.length();
         if (USE_NEW_CONVERTER) {
+            if (METRICS_FILE != null) {
+                IOUtil.assertFileIsWritable(METRICS_FILE);
+            } else {
+                log.warn("No METRIC_FILE specified. Barcode metrics will not be generated.");
+            }
+
             final MetricsFile<BarcodeMetric, Integer> metrics = getMetricsFile();
 
             basecallsConverter = new NewIlluminaBasecallsConverter<>(BASECALLS_DIR, BARCODES_DIR, LANE, readStructure,

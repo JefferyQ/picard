@@ -267,7 +267,7 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
     public int MAX_NO_CALLS = 2;
 
 
-    @Option(doc = "Per-barcode and per-lane metrics written to this file.", shortName = StandardOptionDefinitions.METRICS_FILE_SHORT_NAME)
+    @Option(doc = "Per-barcode and per-lane metrics written to this file.", shortName = StandardOptionDefinitions.METRICS_FILE_SHORT_NAME, optional = true)
     public File METRICS_FILE;
 
     private final Map<String, SAMFileWriterWrapper> barcodeSamWriterMap = new HashMap<String, SAMFileWriterWrapper>();
@@ -314,6 +314,11 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
         if (USE_NEW_CONVERTER) {
             final MetricsFile<BarcodeMetric, Integer> metrics = getMetricsFile();
 
+            if (METRICS_FILE != null) {
+                IOUtil.assertFileIsWritable(METRICS_FILE);
+            } else {
+                log.warn("No METRIC_FILE specified. Barcode metrics will not be generated.");
+            }
             basecallsConverter = new NewIlluminaBasecallsConverter<>(BASECALLS_DIR, BARCODES_DIR, LANE, readStructure,
                     barcodeSamWriterMap, true, Math.max(1, MAX_READS_IN_RAM_PER_TILE / numOutputRecords),
                     TMP_DIR, NUM_PROCESSORS,

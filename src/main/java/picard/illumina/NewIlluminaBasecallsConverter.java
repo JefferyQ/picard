@@ -78,7 +78,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
      * @param minMismatchDelta
      * @param minimumBaseQuality
      * @param metrics
-     * @param METRICS_FILE
+     * @param metricsFile
      */
     public NewIlluminaBasecallsConverter(final File basecallsDir, File barcodesDir, final int lane,
                                          final ReadStructure readStructure,
@@ -201,14 +201,16 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         awaitThreadPoolTermination(writerExecutor);
 
-        ExtractIlluminaBarcodes.finalizeMetrics(barcodesMetrics, noMatchMetric);
+        if (metricsFile != null) {
+            ExtractIlluminaBarcodes.finalizeMetrics(barcodesMetrics, noMatchMetric);
 
-        for (final BarcodeMetric barcodeMetric : barcodesMetrics.values()) {
-            metrics.addMetric(barcodeMetric);
+            for (final BarcodeMetric barcodeMetric : barcodesMetrics.values()) {
+                metrics.addMetric(barcodeMetric);
+            }
+            metrics.addMetric(noMatchMetric);
+            metrics.write(metricsFile);
+            CloserUtil.close(metricsFile);
         }
-        metrics.addMetric(noMatchMetric);
-        metrics.write(metricsFile);
-        CloserUtil.close(metricsFile);
     }
 
     private void awaitThreadPoolTermination(ThreadPoolExecutor executorService) {
