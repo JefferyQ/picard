@@ -216,6 +216,7 @@ public class IlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Basecalls
      * Do the work, i.e. create a bunch of threads to read, sort and write.
      * setConverter() must be called before calling this method.
      */
+    @Override
     public void doTileProcessing() {
         try {
             // TODO: Eliminate this when switch to JDK 7

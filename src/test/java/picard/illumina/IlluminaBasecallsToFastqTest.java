@@ -178,7 +178,8 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
                     "MACHINE_NAME=machine1",
                     "FLOWCELL_BARCODE=abcdeACXX",
                     "USE_NEW_CONVERTER=true",
-                    "NUM_PROCESSORS=2"
+                    "NUM_PROCESSORS=2",
+                    "METRICS_FILE=" + new File(outputDir, "test.metrics")
             });
 
             final ReadStructure readStructure = new ReadStructure(readStructureString);

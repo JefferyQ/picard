@@ -1,19 +1,25 @@
 package picard.illumina;
 
 
+import htsjdk.samtools.metrics.MetricsFile;
+import htsjdk.samtools.util.CloserUtil;
 import htsjdk.samtools.util.IOUtil;
 import htsjdk.samtools.util.Log;
 import htsjdk.samtools.util.SortingCollection;
+import htsjdk.samtools.util.StringUtil;
 import picard.PicardException;
 import picard.illumina.parser.BaseIlluminaDataProvider;
 import picard.illumina.parser.ClusterData;
 import picard.illumina.parser.IlluminaDataProviderFactory;
 import picard.illumina.parser.IlluminaFileUtil;
 import picard.illumina.parser.ParameterizedFileUtil;
+import picard.illumina.parser.ReadDescriptor;
 import picard.illumina.parser.ReadStructure;
+import picard.illumina.parser.ReadType;
 import picard.illumina.parser.readers.AbstractIlluminaPositionFileReader;
 import picard.illumina.parser.readers.BclQualityEvaluationStrategy;
 import picard.illumina.parser.readers.LocsFileReader;
+import picard.util.IlluminaUtil;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -36,6 +42,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private static final Log log = Log.getInstance(NewIlluminaBasecallsConverter.class);
     private static final long FIVE_SECONDS = 5 * 1000;
     private final Map<String, BarcodeMetric> barcodesMetrics = new HashMap<>();
+    private final BarcodeMetric noMatchMetric;
     private final List<File> cbcls;
     private final List<AbstractIlluminaPositionFileReader.PositionInfo> locs = new ArrayList<>();
     private final File[] filterFiles;
@@ -44,6 +51,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private final int minMismatchDelta;
     private final int minimumBaseQuality;
     private final Map<String, Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>>> barcodeRecords = new HashMap<>();
+    private final MetricsFile<BarcodeMetric, Integer> metrics;
+    private final File metricsFile;
 
     /**
      * @param basecallsDir             Where to read basecalls from.
@@ -68,6 +77,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
      * @param maxMismatches
      * @param minMismatchDelta
      * @param minimumBaseQuality
+     * @param metrics
+     * @param METRICS_FILE
      */
     public NewIlluminaBasecallsConverter(final File basecallsDir, File barcodesDir, final int lane,
                                          final ReadStructure readStructure,
@@ -82,7 +93,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                                          final Class<CLUSTER_OUTPUT_RECORD> outputRecordClass,
                                          final BclQualityEvaluationStrategy bclQualityEvaluationStrategy,
                                          final boolean applyEamssFiltering, final boolean includeNonPfReads,
-                                         final boolean ignoreUnexpectedBarcodes, int maxNoCalls, int maxMismatches, int minMismatchDelta, int minimumBaseQuality) {
+                                         final boolean ignoreUnexpectedBarcodes, int maxNoCalls, int maxMismatches,
+                                         int minMismatchDelta, int minimumBaseQuality, MetricsFile<BarcodeMetric, Integer> metrics, File metricsFile) {
 
         super(barcodeRecordWriterMap, maxReadsInRamPerTile, tmpDirs, codecPrototype, ignoreUnexpectedBarcodes,
                 demultiplex, outputRecordComparator, includeNonPfReads, bclQualityEvaluationStrategy,
@@ -93,10 +105,12 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         this.minMismatchDelta = minMismatchDelta;
         this.minimumBaseQuality = minimumBaseQuality;
         this.tiles = new ArrayList<>();
+        this.metrics = metrics;
+        this.metricsFile = metricsFile;
 
         barcodeRecordWriterMap.keySet().forEach(barcode -> {
             if (barcode != null)
-                this.barcodesMetrics.put(barcode, new BarcodeMetric(barcode, barcode, barcode, new String[]{barcode}));
+                this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, new String[]{barcode}));
         });
 
         File laneDir = new File(basecallsDir, IlluminaFileUtil.longLaneStr(lane));
@@ -136,13 +150,26 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         this.factory.setApplyEamssFiltering(applyEamssFiltering);
         setTileLimits(firstTile, tileLimit);
+
+        // Create BarcodeMetric for counting reads that don't match any barcode
+        final String[] noMatchBarcode = new String[readStructure.sampleBarcodes.length()];
+        int index = 0;
+        for (final ReadDescriptor d : readStructure.descriptors) {
+            if (d.type == ReadType.Barcode) {
+                noMatchBarcode[index++] = StringUtil.repeatCharNTimes('N', d.length);
+            }
+        }
+
+        this.noMatchMetric = new BarcodeMetric(null, null, IlluminaUtil.barcodeSeqsToString(noMatchBarcode), noMatchBarcode);
+
     }
 
     private File[] getTiledFiles(File baseDirectory, Pattern pattern) {
         return IOUtil.getFilesMatchingRegexp(baseDirectory, pattern);
     }
 
-    void doTileProcessing() {
+    @Override
+    public void doTileProcessing() {
 
         //thread by surface tile
         ThreadPoolExecutor executorService = new ThreadPoolExecutorWithExceptions(numThreads);
@@ -173,6 +200,15 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         writerExecutor.shutdown();
 
         awaitThreadPoolTermination(writerExecutor);
+
+        ExtractIlluminaBarcodes.finalizeMetrics(barcodesMetrics, noMatchMetric);
+
+        for (final BarcodeMetric barcodeMetric : barcodesMetrics.values()) {
+            metrics.addMetric(barcodeMetric);
+        }
+        metrics.addMetric(noMatchMetric);
+        metrics.write(metricsFile);
+        CloserUtil.close(metricsFile);
     }
 
     private void awaitThreadPoolTermination(ThreadPoolExecutor executorService) {
@@ -224,7 +260,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         @Override
         public void run() {
             final BaseIlluminaDataProvider dataProvider = factory.makeDataProvider(cbcls, locs, filterFiles, tileNum, barcodesMetrics,
-                    maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality);
+                    noMatchMetric, maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality);
 
             while (dataProvider.hasNext()) {
                 final ClusterData cluster = dataProvider.next();

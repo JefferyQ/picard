@@ -243,10 +243,11 @@ public class IlluminaDataProviderFactory {
     public NewIlluminaDataProvider makeDataProvider(List<File> cbcls,
                                                     List<AbstractIlluminaPositionFileReader.PositionInfo> locs,
                                                     File[] filterFiles, int tileNum, Map<String, BarcodeMetric> barcodesMetrics,
+                                                    BarcodeMetric noMatchMetric,
                                                     int maxNoCalls, int maxMismatches, int minMismatchDelta,
                                                     int minimumBaseQuality) {
         return new NewIlluminaDataProvider(cbcls, locs, filterFiles, lane, tileNum, outputMapping,
-                false, barcodesMetrics, maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality);
+                false, barcodesMetrics, noMatchMetric, maxNoCalls, maxMismatches, minMismatchDelta, minimumBaseQuality);
     }
 
     public BaseIlluminaDataProvider makeDataProvider() {

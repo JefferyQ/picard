@@ -30,6 +30,7 @@ import htsjdk.samtools.fastq.FastqReader;
 import htsjdk.samtools.fastq.FastqRecord;
 import htsjdk.samtools.fastq.FastqWriter;
 import htsjdk.samtools.fastq.FastqWriterFactory;
+import htsjdk.samtools.metrics.MetricsFile;
 import htsjdk.samtools.util.CollectionUtil;
 import htsjdk.samtools.util.IOUtil;
 import htsjdk.samtools.util.Log;
@@ -209,6 +210,9 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
     @Option(doc = "Maximum allowable number of no-calls in a barcode read before it is considered unmatchable.")
     public int MAX_NO_CALLS = 2;
 
+    @Option(doc = "Per-barcode and per-lane metrics written to this file.", shortName = StandardOptionDefinitions.METRICS_FILE_SHORT_NAME)
+    public File METRICS_FILE;
+
     /** Simple switch to control the read name format to emit. */
     public enum ReadNameFormat {
         CASAVA_1_8, ILLUMINA
@@ -216,8 +220,7 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
     
     private final Map<String, FastqRecordsWriter> sampleBarcodeFastqWriterMap = new HashMap<>();
     private ReadStructure readStructure;
-    private IlluminaBasecallsConverter<FastqRecordsForCluster> basecallsConverter;
-    private NewIlluminaBasecallsConverter<FastqRecordsForCluster> newBasecallsConverter;
+    private BasecallsConverter<FastqRecordsForCluster> basecallsConverter;
     private static final Log log = Log.getInstance(IlluminaBasecallsToFastq.class);
     private final FastqWriterFactory fastqWriterFactory = new FastqWriterFactory();
     private ReadNameEncoder readNameEncoder;
@@ -227,12 +230,7 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
     @Override
     protected int doWork() {
         initialize();
-        if (USE_NEW_CONVERTER) {
-            newBasecallsConverter.doTileProcessing();
-        } else {
-            basecallsConverter.doTileProcessing();
-        }
-
+        basecallsConverter.doTileProcessing();
         return 0;
     }
 
@@ -287,7 +285,9 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
         }
         final int readsPerCluster = readStructure.templates.length() + readStructure.sampleBarcodes.length();
         if (USE_NEW_CONVERTER) {
-            newBasecallsConverter = new NewIlluminaBasecallsConverter<>(BASECALLS_DIR, BARCODES_DIR, LANE, readStructure,
+            final MetricsFile<BarcodeMetric, Integer> metrics = getMetricsFile();
+
+            basecallsConverter = new NewIlluminaBasecallsConverter<>(BASECALLS_DIR, BARCODES_DIR, LANE, readStructure,
                     sampleBarcodeFastqWriterMap, demultiplex, Math.max(1, MAX_READS_IN_RAM_PER_TILE / readsPerCluster),
                     TMP_DIR, NUM_PROCESSORS,
                     FIRST_TILE, TILE_LIMIT, queryNameComparator,
@@ -295,11 +295,7 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
                             readStructure.sampleBarcodes.length(), readStructure.molecularBarcode.length()),
                     FastqRecordsForCluster.class, bclQualityEvaluationStrategy,
                     this.APPLY_EAMSS_FILTER, INCLUDE_NON_PF_READS, IGNORE_UNEXPECTED_BARCODES, MAX_NO_CALLS,
-                    MAX_MISMATCHES, MIN_MISMATCH_DELTA, MINIMUM_QUALITY);
-
-            newBasecallsConverter.setConverter(
-                    new ClusterToFastqRecordsForClusterConverter(
-                            newBasecallsConverter.getFactory().getOutputReadStructure()));
+                    MAX_MISMATCHES, MIN_MISMATCH_DELTA, MINIMUM_QUALITY, metrics, METRICS_FILE);
         } else {
             basecallsConverter = new IlluminaBasecallsConverter<>(BASECALLS_DIR, BARCODES_DIR, LANE, readStructure,
                     sampleBarcodeFastqWriterMap, demultiplex, Math.max(1, MAX_READS_IN_RAM_PER_TILE / readsPerCluster), TMP_DIR, NUM_PROCESSORS,
@@ -307,11 +303,12 @@ public class IlluminaBasecallsToFastq extends CommandLineProgram {
                     new FastqRecordsForClusterCodec(readStructure.templates.length(),
                             readStructure.sampleBarcodes.length(), readStructure.molecularBarcode.length()), FastqRecordsForCluster.class, bclQualityEvaluationStrategy,
                     this.APPLY_EAMSS_FILTER, INCLUDE_NON_PF_READS, IGNORE_UNEXPECTED_BARCODES);
-
-            basecallsConverter.setConverter(
-                    new ClusterToFastqRecordsForClusterConverter(
-                            basecallsConverter.getFactory().getOutputReadStructure()));
         }
+
+        basecallsConverter.setConverter(
+                new ClusterToFastqRecordsForClusterConverter(
+                        basecallsConverter.getFactory().getOutputReadStructure()));
+
         log.info("READ STRUCTURE IS " + readStructure.toString());
     }
 

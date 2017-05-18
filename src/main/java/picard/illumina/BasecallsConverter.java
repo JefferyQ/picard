@@ -71,6 +71,7 @@ abstract class BasecallsConverter<CLUSTER_OUTPUT_RECORD> {
         return factory;
     }
 
+    public abstract void doTileProcessing();
     /**
      * Must be called before doTileProcessing.  This is not passed in the ctor because often the
      * IlluminaDataProviderFactory is needed in order to construct the converter.

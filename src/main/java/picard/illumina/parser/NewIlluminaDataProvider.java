@@ -8,7 +8,6 @@ import picard.illumina.parser.readers.CbclReader;
 
 import java.io.File;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -23,11 +22,13 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
     private final int maxMismatches;
     private final int minMismatchDelta;
     private final int minimumBaseQuality;
-    private final Iterator<AbstractIlluminaPositionFileReader.PositionInfo> locsIterator;
+    private final BarcodeMetric noMatchMetric;
+
 
     NewIlluminaDataProvider(final List<File> cbcls, final List<AbstractIlluminaPositionFileReader.PositionInfo> locs,
                             final File[] filterFiles, final int lane, final int tileNum, final OutputMapping outputMapping,
                             boolean usingQualityScores, final Map<String, BarcodeMetric> barcodesMetrics,
+                            final BarcodeMetric noMatchMetric,
                             int maxNoCalls, int maxMismatches, int minMismatchDelta, int minimumBaseQuality) {
         super(lane, outputMapping);
         this.usingQualityScores = usingQualityScores;
@@ -42,7 +43,8 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
         }
         this.reader = new CbclReader(cbcls, filterFileMap, outputMapping.getOutputReadLengths(), tileNum, locs);
         this.outputReadStructure = outputMapping.getOutputReadStructure();
-        this.locsIterator = locs.iterator();
+
+        this.noMatchMetric = noMatchMetric;
     }
 
     @Override
@@ -82,9 +84,9 @@ public class NewIlluminaDataProvider extends BaseIlluminaDataProvider {
             if (usingQualityScores) qualityScores[i] = cluster.getRead(barcodeIndices[i]).getQualities();
         }
 
-        //do we want metrics?
+
         final BarcodeMatch match = BarcodeMatch.findBestBarcodeAndUpdateMetrics(barcodeSubsequences, qualityScores,
-                true, barcodeMetricMap, new BarcodeMetric(), maxNoCalls, maxMismatches,
+                true, barcodeMetricMap, noMatchMetric, maxNoCalls, maxMismatches,
                 minMismatchDelta, minimumBaseQuality);
 
         if (match.isMatched()) {
