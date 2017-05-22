@@ -114,7 +114,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                 String[] bcStrings = new String[numBarcodes];
                 for (int i = 0; i < numBarcodes; i++) {
                     int endIndex = readStructure.sampleBarcodes.getDescriptorLengths()[i];
-                    bcStrings[0] = barcode.substring(pos, endIndex + pos);
+                    bcStrings[i] = barcode.substring(pos, endIndex + pos);
                     pos += endIndex;
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
