@@ -107,10 +107,18 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         this.tiles = new ArrayList<>();
         this.metrics = metrics;
         this.metricsFile = metricsFile;
-
+        int numBarcodes = readStructure.sampleBarcodes.length();
         barcodeRecordWriterMap.keySet().forEach(barcode -> {
-            if (barcode != null)
-                this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, new String[]{barcode}));
+            if (barcode != null) {
+                int pos = 0;
+                String[] bcStrings = new String[numBarcodes];
+                for (int i = 0; i < numBarcodes; i++) {
+                    int endIndex = readStructure.sampleBarcodes.getDescriptorLengths()[i];
+                    bcStrings[0] = barcode.substring(pos, endIndex + pos);
+                    pos += endIndex;
+                }
+                this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
+            }
         });
 
         File laneDir = new File(basecallsDir, IlluminaFileUtil.longLaneStr(lane));
