@@ -28,7 +28,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CancellationException;
@@ -52,7 +51,6 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private final int maxMismatches;
     private final int minMismatchDelta;
     private final int minimumBaseQuality;
-    private final Map<String, Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>>> barcodeRecords = new HashMap<>();
     private final MetricsFile<BarcodeMetric, Integer> metrics;
     private final File metricsFile;
     private final Map<String, BlockingQueue<CLUSTER_OUTPUT_RECORD>> blockingQueueMap = new HashMap<>();
@@ -214,14 +212,14 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         }
 
         writerExecutor.shutdown();
-        awaitThreadPoolTermination(executorService);
+        awaitThreadPoolTermination("Reading executor", executorService);
         //we are done reading.. signal to the writers that we are not adding any more records to their BlockingQueue
 
         for (RecordWriter writer : writers) {
             writer.signalDoneAdding();
         }
 
-        awaitThreadPoolTermination(writerExecutor);
+        awaitThreadPoolTermination("Writing executor", writerExecutor);
         if (metricsFile != null) {
             ExtractIlluminaBarcodes.finalizeMetrics(barcodesMetrics, noMatchMetric);
 
@@ -234,11 +232,11 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         }
     }
 
-    private void awaitThreadPoolTermination(ThreadPoolExecutor executorService) {
+    private void awaitThreadPoolTermination(String executorName, ThreadPoolExecutor executorService) {
         try {
             while (!executorService.awaitTermination(300, TimeUnit.SECONDS)) {
-                log.info(String.format("Waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d",
-                        executorService.getCompletedTaskCount(), executorService.getActiveCount(), executorService.getQueue().size()));
+                log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d",
+                        executorName, executorService.getCompletedTaskCount(), executorService.getActiveCount(), executorService.getQueue().size()));
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
@@ -285,36 +283,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         }
     }
 
-    private class RecordQueue implements Runnable {
-        private final String barcode;
-        private final SortingCollection<CLUSTER_OUTPUT_RECORD> recordsList;
-
-        RecordQueue(String barcode, SortingCollection<CLUSTER_OUTPUT_RECORD> recordsList) {
-            this.barcode = barcode;
-            this.recordsList = recordsList;
-        }
-
-        @Override
-        public void run() {
-            final BlockingQueue<CLUSTER_OUTPUT_RECORD> recordBlockingQueue = blockingQueueMap.get(barcode);
-            if (recordsList != null) {
-                for (CLUSTER_OUTPUT_RECORD rec : recordsList) {
-                    try {
-                        recordBlockingQueue.put(rec);
-                    } catch (InterruptedException e) {
-                        throw new PicardException(e.getMessage(), e);
-                    }
-                }
-            }
-        }
-    }
-
-
     private class TileProcessor implements Runnable {
         private final int tileNum;
-        final private Map<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> barcodeToRecordCollection =
-                new HashMap<>();
-
         TileProcessor(int tileNum) {
             this.tileNum = tileNum;
         }
@@ -332,64 +302,16 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
             }
 
             dataProvider.close();
-            //we are done adding records
-            this.barcodeToRecordCollection.values().forEach(SortingCollection::doneAdding);
 
-            for (Map.Entry<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> entry : barcodeToRecordCollection.entrySet()) {
-                if (barcodeRecords.containsKey(entry.getKey())) {
-                    barcodeRecords.get(entry.getKey()).put(tileNum, entry.getValue());
-                } else {
-                    Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>> collectionList = new TreeMap<>();
-                    collectionList.put(tileNum, entry.getValue());
-                    barcodeRecords.put(entry.getKey(), collectionList);
-                }
-            }
-
-            ThreadPoolExecutor queueinExecutor = new ThreadPoolExecutorWithExceptions(barcodeRecordWriterMap.keySet().size());
-
-            for (String barcode : barcodeRecordWriterMap.keySet()) {
-                if (barcodeRecords.get(barcode) != null && barcodeRecords.get(barcode).get(tileNum) != null) {
-                    queueinExecutor.submit(new RecordQueue(barcode, barcodeRecords.get(barcode).get(tileNum)));
-                }
-            }
-
-            queueinExecutor.shutdown();
-
-            awaitThreadPoolTermination(queueinExecutor);
-
-            barcodeToRecordCollection.clear();
             log.info("Finished processing tile " + tileNum);
         }
 
-        private synchronized void addRecord(final String barcode, final CLUSTER_OUTPUT_RECORD record) {
-            // Grab the existing collection, or initialize it if it doesn't yet exist
-            SortingCollection<CLUSTER_OUTPUT_RECORD> recordCollection = this.barcodeToRecordCollection.get(barcode);
-            if (recordCollection == null) {
-                // TODO: The implementation here for supporting ignoreUnexpectedBarcodes is not efficient,
-                // but the alternative is an extensive rewrite.  We are living with the inefficiency for
-                // this special case for the time being.
-                if (!barcodeRecordWriterMap.containsKey(barcode)) {
-                    if (ignoreUnexpectedBarcodes) {
-                        return;
-                    }
-                    throw new PicardException(String.format("Read records with barcode %s, but this barcode was not expected.  (Is it referenced in the parameters file?)", barcode));
-                }
-                recordCollection = newSortingCollection();
-                this.barcodeToRecordCollection.put(barcode, recordCollection);
+        private void addRecord(final String barcode, final CLUSTER_OUTPUT_RECORD record) {
+            try {
+                blockingQueueMap.get(barcode).put(record);
+            } catch (InterruptedException e) {
+                throw new PicardException(e.getMessage(), e);
             }
-            recordCollection.add(record);
-        }
-
-        private synchronized SortingCollection<CLUSTER_OUTPUT_RECORD> newSortingCollection() {
-            final int maxRecordsInRam =
-                    Math.max(1, maxReadsInRamPerTile /
-                            barcodeRecordWriterMap.size());
-            return SortingCollection.newInstance(
-                    outputRecordClass,
-                    codecPrototype.clone(),
-                    outputRecordComparator,
-                    maxRecordsInRam,
-                    tmpDirs);
         }
     }
 
