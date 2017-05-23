@@ -29,6 +29,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -53,6 +55,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private final Map<String, Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>>> barcodeRecords = new HashMap<>();
     private final MetricsFile<BarcodeMetric, Integer> metrics;
     private final File metricsFile;
+    private final Map<String, BlockingQueue<CLUSTER_OUTPUT_RECORD>> blockingQueueMap = new HashMap<>();
 
     /**
      * @param basecallsDir             Where to read basecalls from.
@@ -108,6 +111,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         this.metrics = metrics;
         this.metricsFile = metricsFile;
         int numBarcodes = readStructure.sampleBarcodes.length();
+
         barcodeRecordWriterMap.keySet().forEach(barcode -> {
             if (barcode != null) {
                 int pos = 0;
@@ -119,6 +123,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
             }
+            blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(maxReadsInRamPerTile, true));
         });
 
         File laneDir = new File(basecallsDir, IlluminaFileUtil.longLaneStr(lane));
@@ -127,12 +132,15 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         //CBCLs
         cbcls = new ArrayList<>();
-        Arrays.asList(cycleDirs).forEach(cycleDir -> {
-            cbcls.addAll(Arrays.asList(IOUtil.getFilesMatchingRegexp(cycleDir, "^" + IlluminaFileUtil.longLaneStr(lane) + "_(\\d{1,5}).cbcl$")));
-        });
+        Arrays.asList(cycleDirs)
+                .forEach(cycleDir -> cbcls.addAll(
+                        Arrays.asList(IOUtil.getFilesMatchingRegexp(
+                                cycleDir, "^" + IlluminaFileUtil.longLaneStr(lane) + "_(\\d{1,5}).cbcl$"))));
+
         if (cbcls.size() == 0) {
             throw new PicardException("No CBCL files found.");
         }
+
         IOUtil.assertFilesAreReadable(cbcls);
 
         //locs
@@ -197,18 +205,23 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         executorService.shutdown();
 
-        awaitThreadPoolTermination(executorService);
-
         ThreadPoolExecutor writerExecutor = new ThreadPoolExecutorWithExceptions(barcodeRecordWriterMap.keySet().size());
-
+        List<RecordWriter> writers = new ArrayList<>();
         for (String barcode : barcodeRecordWriterMap.keySet()) {
-            writerExecutor.submit(new RecordWriter(barcode, this.barcodeRecords.get(barcode)));
+            RecordWriter writer = new RecordWriter(barcode, blockingQueueMap.get(barcode));
+            writers.add(writer);
+            writerExecutor.submit(writer);
         }
 
         writerExecutor.shutdown();
+        awaitThreadPoolTermination(executorService);
+        //we are done reading.. signal to the writers that we are not adding any more records to their BlockingQueue
+
+        for (RecordWriter writer : writers) {
+            writer.signalDoneAdding();
+        }
 
         awaitThreadPoolTermination(writerExecutor);
-
         if (metricsFile != null) {
             ExtractIlluminaBarcodes.finalizeMetrics(barcodesMetrics, noMatchMetric);
 
@@ -234,26 +247,65 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
     private class RecordWriter implements Runnable {
         private final String barcode;
-        private final Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>> recordsList;
+        private final BlockingQueue<CLUSTER_OUTPUT_RECORD> recordBlockingQueue;
+        private boolean stillAdding = true;
 
-        RecordWriter(String barcode, Map<Integer, SortingCollection<CLUSTER_OUTPUT_RECORD>> recordsList) {
+        private RecordWriter(String barcode, BlockingQueue<CLUSTER_OUTPUT_RECORD> recordBlockingQueue) {
+            this.barcode = barcode;
+            this.recordBlockingQueue = recordBlockingQueue;
+        }
+
+        @Override
+        public void run() {
+            final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
+            try {
+                while (stillAdding) {
+                    CLUSTER_OUTPUT_RECORD rec;
+                    if ((rec = recordBlockingQueue.poll()) != null) {
+                        writer.write(rec);
+                        writeProgressLogger.record("", 0);
+                    } else {
+                        Thread.sleep(5000);
+                    }
+                }
+
+                //we are done adding... now drain the queue
+                for (CLUSTER_OUTPUT_RECORD aRecordBlockingQueue : recordBlockingQueue) {
+                    writer.write(aRecordBlockingQueue);
+                }
+
+                writer.close();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        void signalDoneAdding() {
+            stillAdding = false;
+        }
+    }
+
+    private class RecordQueue implements Runnable {
+        private final String barcode;
+        private final SortingCollection<CLUSTER_OUTPUT_RECORD> recordsList;
+
+        RecordQueue(String barcode, SortingCollection<CLUSTER_OUTPUT_RECORD> recordsList) {
             this.barcode = barcode;
             this.recordsList = recordsList;
         }
 
         @Override
         public void run() {
-            final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
+            final BlockingQueue<CLUSTER_OUTPUT_RECORD> recordBlockingQueue = blockingQueueMap.get(barcode);
             if (recordsList != null) {
-                for (SortingCollection<CLUSTER_OUTPUT_RECORD> records : recordsList.values()) {
-                    for (CLUSTER_OUTPUT_RECORD rec : records) {
-                        writer.write(rec);
-                        writeProgressLogger.record(null, 0);
+                for (CLUSTER_OUTPUT_RECORD rec : recordsList) {
+                    try {
+                        recordBlockingQueue.put(rec);
+                    } catch (InterruptedException e) {
+                        throw new PicardException(e.getMessage(), e);
                     }
                 }
             }
-            log.info(String.format("Closing file for barcode %s.", barcode));
-            writer.close();
         }
     }
 
@@ -292,6 +344,19 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     barcodeRecords.put(entry.getKey(), collectionList);
                 }
             }
+
+            ThreadPoolExecutor queueinExecutor = new ThreadPoolExecutorWithExceptions(barcodeRecordWriterMap.keySet().size());
+
+            for (String barcode : barcodeRecordWriterMap.keySet()) {
+                if (barcodeRecords.get(barcode) != null && barcodeRecords.get(barcode).get(tileNum) != null) {
+                    queueinExecutor.submit(new RecordQueue(barcode, barcodeRecords.get(barcode).get(tileNum)));
+                }
+            }
+
+            queueinExecutor.shutdown();
+
+            awaitThreadPoolTermination(queueinExecutor);
+
             barcodeToRecordCollection.clear();
             log.info("Finished processing tile " + tileNum);
         }
