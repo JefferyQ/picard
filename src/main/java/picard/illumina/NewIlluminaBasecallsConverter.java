@@ -28,6 +28,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -119,7 +120,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     pos += endIndex;
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
-                blockingQueueMap.put(barcode, new LinkedBlockingQueue<>());
+                blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(maxReadsInRamPerTile, true));
             } else {
                 //we expect a lot more unidentified reads so make a bigger queue
                 blockingQueueMap.put(null, new LinkedBlockingQueue<>());
@@ -263,8 +264,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         @Override
         public void run() {
-
-            Thread.currentThread().setPriority(Thread.currentThread().getThreadGroup().getMaxPriority());
+            if (this.barcode == null) {
+                //set higher priority for the undefined barcode thread since we expect the most reads
+                Thread.currentThread().setPriority(Thread.currentThread().getThreadGroup().getMaxPriority());
+            }
 
             final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
             try {
