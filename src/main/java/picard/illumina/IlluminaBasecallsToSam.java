@@ -298,7 +298,7 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
         }
 
         if (OUTPUT != null) {
-            barcodeSamWriterMap.put(null, buildSamFileWriter(OUTPUT, SAMPLE_ALIAS, LIBRARY_NAME, buildSamHeaderParameters(null)));
+            barcodeSamWriterMap.put(null, buildSamFileWriter(OUTPUT, SAMPLE_ALIAS, LIBRARY_NAME, buildSamHeaderParameters(null), !USE_NEW_CONVERTER));
         } else {
             populateWritersFromLibraryParams();
         }
@@ -442,7 +442,7 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
             }
 
             final SAMFileWriterWrapper writer = buildSamFileWriter(new File(row.getField("OUTPUT")),
-                    row.getField("SAMPLE_ALIAS"), row.getField("LIBRARY_NAME"), samHeaderParams);
+                    row.getField("SAMPLE_ALIAS"), row.getField("LIBRARY_NAME"), samHeaderParams, !USE_NEW_CONVERTER);
             barcodeSamWriterMap.put(key, writer);
         }
         if (barcodeSamWriterMap.isEmpty()) {
@@ -483,7 +483,8 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
      * @return A SAMFileWriter
      */
     private SAMFileWriterWrapper buildSamFileWriter(final File output, final String sampleAlias,
-                                                    final String libraryName, final Map<String, String> headerParameters) {
+                                                    final String libraryName, final Map<String, String> headerParameters,
+                                                    final boolean presorted) {
         IOUtil.assertFileIsWritable(output);
         final SAMReadGroupRecord rg = new SAMReadGroupRecord(READ_GROUP_ID);
         rg.setSample(sampleAlias);
@@ -499,7 +500,7 @@ public class IlluminaBasecallsToSam extends CommandLineProgram {
 
         header.setSortOrder(SAMFileHeader.SortOrder.queryname);
         header.addReadGroup(rg);
-        return new SAMFileWriterWrapper(new SAMFileWriterFactory().makeSAMOrBAMWriter(header, true, output));
+        return new SAMFileWriterWrapper(new SAMFileWriterFactory().makeSAMOrBAMWriter(header, presorted, output));
     }
 
     public static void main(final String[] args) {

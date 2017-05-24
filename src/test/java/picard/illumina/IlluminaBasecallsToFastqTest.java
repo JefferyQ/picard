@@ -23,11 +23,14 @@
  */
 package picard.illumina;
 
+import htsjdk.samtools.fastq.FastqReader;
+import htsjdk.samtools.fastq.FastqRecord;
 import htsjdk.samtools.util.BufferedLineReader;
 import htsjdk.samtools.util.IOUtil;
 import htsjdk.samtools.util.LineReader;
 import htsjdk.samtools.util.StringUtil;
 import htsjdk.samtools.util.TestUtil;
+import org.testng.Assert;
 import org.testng.annotations.Test;
 import picard.cmdline.CommandLineProgramTest;
 import picard.illumina.parser.ReadStructure;
@@ -186,19 +189,34 @@ public class IlluminaBasecallsToFastqTest extends CommandLineProgramTest {
             for (final File outputSam : outputPrefixes) {
                 for (int i = 1; i <= readStructure.templates.length(); ++i) {
                     final String filename = outputSam.getName() + "." + i + ".fastq";
-                    IOUtil.assertFilesEqual(new File(outputSam.getParentFile(), filename), new File(testDataDir, filename));
+                    compareFastqs(testDataDir, outputSam, filename);
                 }
                 for (int i = 1; i <= readStructure.sampleBarcodes.length(); ++i) {
                     final String filename = outputSam.getName() + ".barcode_" + i + ".fastq";
-                    IOUtil.assertFilesEqual(new File(outputSam.getParentFile(), filename), new File(testDataDir, filename));
+                    compareFastqs(testDataDir, outputSam, filename);
                 }
                 for (int i = 1; i <= readStructure.molecularBarcode.length(); ++i) {
                     final String filename = outputSam.getName() + ".index_" + i + ".fastq";
-                    IOUtil.assertFilesEqual(new File(outputSam.getParentFile(), filename), new File(testDataDir, filename));
+                    compareFastqs(testDataDir, outputSam, filename);
                 }
             }
         } finally {
             TestUtil.recursiveDelete(outputDir);
+        }
+    }
+
+    private void compareFastqs(File testDataDir, File outputSam, String filename) {
+        File f1 = new File(outputSam.getParentFile(), filename);
+        File f2 = new File(testDataDir, filename);
+        FastqReader reader1 = new FastqReader(f1);
+        List<FastqRecord> reads = new ArrayList<>();
+        FastqReader reader2 = new FastqReader(f2);
+        for (FastqRecord record : reader1) {
+            reads.add(record);
+        }
+
+        for (FastqRecord record : reader2) {
+            Assert.assertTrue(reads.contains(record));
         }
     }
 

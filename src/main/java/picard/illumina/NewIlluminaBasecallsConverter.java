@@ -188,25 +188,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
     @Override
     public void doTileProcessing() {
-
-        //thread by surface tile
-        ThreadPoolExecutor executorService = new ThreadPoolExecutorWithExceptions(numThreads);
-
-        for (Integer tile : tiles) {
-            executorService.submit(new TileProcessor(tile));
-            //stagger by 30 seconds to avoid all threads hitting the same file at once. Once the thread pool is full
-            //we can submit faster
-            try {
-                if (executorService.getMaximumPoolSize() > executorService.getActiveCount()) {
-                    Thread.sleep(1000);
-                }
-            } catch (InterruptedException e) {
-                throw new PicardException("Interrupted during submit sleep.", e);
-            }
-        }
-
-        executorService.shutdown();
-
+        //spin up the writers
         ThreadPoolExecutor writerExecutor = new ThreadPoolExecutorWithExceptions(barcodeRecordWriterMap.keySet().size());
         List<RecordWriter> writers = new ArrayList<>();
         for (String barcode : barcodeRecordWriterMap.keySet()) {
@@ -216,6 +198,16 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         }
 
         writerExecutor.shutdown();
+
+        //thread by surface tile
+        ThreadPoolExecutor executorService = new ThreadPoolExecutorWithExceptions(numThreads);
+
+        for (Integer tile : tiles) {
+            executorService.submit(new TileProcessor(tile));
+        }
+
+        executorService.shutdown();
+
         awaitThreadPoolTermination("Reading executor", executorService);
         //we are done reading.. signal to the writers that we are not adding any more records to their BlockingQueue
 
