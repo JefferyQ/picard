@@ -263,10 +263,11 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
             final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
             try {
                 while (stillAdding) {
-                    if (recordBlockingQueue.size() != 0) {
-                        recordBlockingQueue.parallelStream().forEach(rec1 -> {
-                            recordBlockingQueue.remove(rec1);
-                            writer.write(rec1);
+                    List<CLUSTER_OUTPUT_RECORD> list = new ArrayList<>();
+                    recordBlockingQueue.drainTo(list);
+                    if (list.size() != 0) {
+                        list.forEach(record -> {
+                            writer.write(record);
                             writeProgressLogger.record(null, 0);
                         });
                     } else {
@@ -275,10 +276,11 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                 }
 
                 //we are done adding... now drain the queue
-                for (CLUSTER_OUTPUT_RECORD aRecordBlockingQueue : recordBlockingQueue) {
-                    writer.write(aRecordBlockingQueue);
+                recordBlockingQueue.forEach(record -> {
+                    recordBlockingQueue.remove(record);
+                    writer.write(record);
                     writeProgressLogger.record(null, 0);
-                }
+                });
 
                 writer.close();
             } catch (InterruptedException e) {
