@@ -41,7 +41,6 @@ import java.util.regex.Pattern;
 
 public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends BasecallsConverter<CLUSTER_OUTPUT_RECORD> {
     private static final Log log = Log.getInstance(NewIlluminaBasecallsConverter.class);
-    private static final long FIVE_SECONDS = 5 * 1000;
     private final Map<String, BarcodeMetric> barcodesMetrics = new HashMap<>();
     private final BarcodeMetric noMatchMetric;
     private final List<File> cbcls;
@@ -120,8 +119,12 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     pos += endIndex;
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
+                blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(maxReadsInRamPerTile, true));
+            } else {
+                //we expect a lot more unidentified reads so make a bigger queue
+                blockingQueueMap.put(null, new ArrayBlockingQueue<>(maxReadsInRamPerTile * 4, true));
             }
-            blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(maxReadsInRamPerTile, true));
+
         });
 
         File laneDir = new File(basecallsDir, IlluminaFileUtil.longLaneStr(lane));
@@ -194,7 +197,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
             //we can submit faster
             try {
                 if (executorService.getMaximumPoolSize() > executorService.getActiveCount()) {
-                    Thread.sleep(FIVE_SECONDS);
+                    Thread.sleep(1000);
                 }
             } catch (InterruptedException e) {
                 throw new PicardException("Interrupted during submit sleep.", e);
@@ -237,8 +240,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
             while (!executorService.awaitTermination(300, TimeUnit.SECONDS)) {
                 final int[] queuedReads = {0};
                 blockingQueueMap.values().forEach(queue -> queuedReads[0] += queue.size());
-                log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d : Reads in queue - %d",
-                        executorName, executorService.getCompletedTaskCount(), executorService.getActiveCount(), executorService.getQueue().size(), queuedReads[0]));
+                log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d : Reads in queue - %d : Reads in unidentified queue - %d",
+                        executorName, executorService.getCompletedTaskCount(), executorService.getActiveCount(), executorService.getQueue().size(), queuedReads[0], blockingQueueMap.get(null).size()));
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
