@@ -22,13 +22,14 @@ import picard.illumina.parser.readers.LocsFileReader;
 import picard.util.IlluminaUtil;
 
 import java.io.File;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -51,7 +52,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private final int minimumBaseQuality;
     private final MetricsFile<BarcodeMetric, Integer> metrics;
     private final File metricsFile;
-    private final Map<String, ArrayDeque<CLUSTER_OUTPUT_RECORD>> arrayDequeMap = new HashMap<>();
+    private final Map<String, BlockingQueue<CLUSTER_OUTPUT_RECORD>> blockingQueueMap = new HashMap<>();
 
     /**
      * @param basecallsDir             Where to read basecalls from.
@@ -118,10 +119,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     pos += endIndex;
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
-                arrayDequeMap.put(barcode, new ArrayDeque<>());
+                blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(Integer.MAX_VALUE));
             } else {
                 //we expect a lot more unidentified reads so make a bigger queue
-                arrayDequeMap.put(null, new ArrayDeque<>());
+                blockingQueueMap.put(null, new ArrayBlockingQueue<>(Integer.MAX_VALUE));
             }
 
         });
@@ -190,7 +191,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         ThreadPoolExecutor writerExecutor = new ThreadPoolExecutorWithExceptions(barcodeRecordWriterMap.keySet().size());
         List<RecordWriter> writers = new ArrayList<>();
         for (String barcode : barcodeRecordWriterMap.keySet()) {
-            RecordWriter writer = new RecordWriter(barcode, arrayDequeMap.get(barcode));
+            RecordWriter writer = new RecordWriter(barcode, blockingQueueMap.get(barcode));
             writers.add(writer);
             writerExecutor.submit(writer);
         }
@@ -230,12 +231,12 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         try {
             while (!executorService.awaitTermination(300, TimeUnit.SECONDS)) {
                 final int[] queuedReads = {0};
-                arrayDequeMap.values().forEach(queue -> {
+                blockingQueueMap.values().forEach(queue -> {
                     queuedReads[0] += queue.size();
                 });
                 log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d : Reads in queue - %d : Reads in unidentified queue - %d",
                         executorName, executorService.getCompletedTaskCount(), executorService.getActiveCount(),
-                        executorService.getQueue().size(), queuedReads[0], arrayDequeMap.get(null).size()));
+                        executorService.getQueue().size(), queuedReads[0], blockingQueueMap.get(null).size()));
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
@@ -244,40 +245,40 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
     private class RecordWriter implements Runnable {
         private final String barcode;
-        private final ArrayDeque<CLUSTER_OUTPUT_RECORD> recordBlockingQueue;
+        private final BlockingQueue<CLUSTER_OUTPUT_RECORD> blockingQueue;
         private boolean stillAdding = true;
 
-        private RecordWriter(String barcode, ArrayDeque<CLUSTER_OUTPUT_RECORD> recordBlockingQueue) {
+        private RecordWriter(String barcode, BlockingQueue<CLUSTER_OUTPUT_RECORD> blockingQueue) {
             this.barcode = barcode;
-            this.recordBlockingQueue = recordBlockingQueue;
+            this.blockingQueue = blockingQueue;
         }
 
         @Override
         public void run() {
 
             final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
-            try {
-                while (stillAdding) {
-                    CLUSTER_OUTPUT_RECORD record = recordBlockingQueue.poll();
-                    if (record != null) {
-                        writer.write(record);
-                        writeProgressLogger.record(null, 0);
-                    } else {
-                        Thread.sleep(5000);
-                    }
-                }
 
-                CLUSTER_OUTPUT_RECORD record;
-                //we are done adding... now drain the queue
-                while ((record = recordBlockingQueue.poll()) != null) {
+            while (stillAdding) {
+                CLUSTER_OUTPUT_RECORD record = null;
+                try {
+                    record = blockingQueue.poll(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                if (record != null) {
                     writer.write(record);
                     writeProgressLogger.record(null, 0);
                 }
-
-                writer.close();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
             }
+
+            CLUSTER_OUTPUT_RECORD record;
+            //we are done adding... now drain the queue
+            while ((record = blockingQueue.poll()) != null) {
+                writer.write(record);
+                writeProgressLogger.record(null, 0);
+            }
+
+            writer.close();
         }
 
         void signalDoneAdding() {
@@ -310,7 +311,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
         }
 
         private void addRecord(final String barcode, final CLUSTER_OUTPUT_RECORD record) {
-            arrayDequeMap.get(barcode).add(record);
+            blockingQueueMap.get(barcode).add(record);
         }
     }
 
