@@ -265,11 +265,12 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                 while (stillAdding) {
                     if (recordBlockingQueue.size() != 0) {
                         recordBlockingQueue.parallelStream().forEach(rec1 -> {
+                            recordBlockingQueue.remove(rec1);
                             writer.write(rec1);
                             writeProgressLogger.record(null, 0);
                         });
                     } else {
-                        Thread.sleep(100);
+                        Thread.sleep(5000);
                     }
                 }
 
