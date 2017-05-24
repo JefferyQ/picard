@@ -119,10 +119,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     pos += endIndex;
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
-                blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(Integer.MAX_VALUE));
+                blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(Integer.MAX_VALUE - 5));
             } else {
                 //we expect a lot more unidentified reads so make a bigger queue
-                blockingQueueMap.put(null, new ArrayBlockingQueue<>(Integer.MAX_VALUE));
+                blockingQueueMap.put(null, new ArrayBlockingQueue<>(Integer.MAX_VALUE - 5));
             }
 
         });
