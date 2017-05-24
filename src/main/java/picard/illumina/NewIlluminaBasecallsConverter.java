@@ -261,7 +261,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     CLUSTER_OUTPUT_RECORD rec;
                     if ((rec = recordBlockingQueue.poll()) != null) {
                         writer.write(rec);
-                        writeProgressLogger.record("", 0);
+                        writeProgressLogger.record(null, 0);
                     } else {
                         Thread.sleep(5000);
                     }
@@ -270,6 +270,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                 //we are done adding... now drain the queue
                 for (CLUSTER_OUTPUT_RECORD aRecordBlockingQueue : recordBlockingQueue) {
                     writer.write(aRecordBlockingQueue);
+                    writeProgressLogger.record(null, 0);
                 }
 
                 writer.close();
