@@ -263,10 +263,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         @Override
         public void run() {
-            if (this.barcode == null) {
-                //set higher priority for the undefined barcode thread since we expect the most reads
-                Thread.currentThread().setPriority(Thread.currentThread().getThreadGroup().getMaxPriority());
-            }
+
+            Thread.currentThread().setPriority(Thread.currentThread().getThreadGroup().getMaxPriority());
 
             final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
             try {
