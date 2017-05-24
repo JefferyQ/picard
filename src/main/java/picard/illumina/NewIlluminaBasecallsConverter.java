@@ -28,12 +28,12 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -119,10 +119,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     pos += endIndex;
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
-                blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(Integer.MAX_VALUE - 5));
+                blockingQueueMap.put(barcode, new LinkedBlockingQueue<>());
             } else {
                 //we expect a lot more unidentified reads so make a bigger queue
-                blockingQueueMap.put(null, new ArrayBlockingQueue<>(Integer.MAX_VALUE - 5));
+                blockingQueueMap.put(null, new LinkedBlockingQueue<>());
             }
 
         });
