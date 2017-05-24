@@ -34,7 +34,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingDeque;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -120,10 +119,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     pos += endIndex;
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
-                blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(maxReadsInRamPerTile, true));
+                blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(maxReadsInRamPerTile));
             } else {
                 //we expect a lot more unidentified reads so make a bigger queue
-                blockingQueueMap.put(null, new LinkedBlockingQueue<>());
+                blockingQueueMap.put(null, new ArrayBlockingQueue<>(maxReadsInRamPerTile * 10));
             }
 
         });
@@ -264,10 +263,11 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
             final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
             try {
                 while (stillAdding) {
-                    CLUSTER_OUTPUT_RECORD rec;
-                    if ((rec = recordBlockingQueue.poll()) != null) {
-                        writer.write(rec);
-                        writeProgressLogger.record(null, 0);
+                    if (recordBlockingQueue.size() != 0) {
+                        recordBlockingQueue.parallelStream().forEach(rec1 -> {
+                            writer.write(rec1);
+                            writeProgressLogger.record(null, 0);
+                        });
                     } else {
                         Thread.sleep(100);
                     }
