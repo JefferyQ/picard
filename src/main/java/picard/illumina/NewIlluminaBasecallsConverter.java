@@ -235,8 +235,10 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private void awaitThreadPoolTermination(String executorName, ThreadPoolExecutor executorService) {
         try {
             while (!executorService.awaitTermination(300, TimeUnit.SECONDS)) {
-                log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d",
-                        executorName, executorService.getCompletedTaskCount(), executorService.getActiveCount(), executorService.getQueue().size()));
+                final int[] queuedReads = {0};
+                blockingQueueMap.values().forEach(queue -> queuedReads[0] += queue.size());
+                log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d : Reads in queue - %d",
+                        executorName, executorService.getCompletedTaskCount(), executorService.getActiveCount(), executorService.getQueue().size(), queuedReads[0]));
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
@@ -286,6 +288,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
     private class TileProcessor implements Runnable {
         private final int tileNum;
+
         TileProcessor(int tileNum) {
             this.tileNum = tileNum;
         }
