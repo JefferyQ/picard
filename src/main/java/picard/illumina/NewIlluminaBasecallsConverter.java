@@ -28,7 +28,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -120,7 +119,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     pos += endIndex;
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
-                blockingQueueMap.put(barcode, new ArrayBlockingQueue<>(maxReadsInRamPerTile, true));
+                blockingQueueMap.put(barcode, new LinkedBlockingQueue<>());
             } else {
                 //we expect a lot more unidentified reads so make a bigger queue
                 blockingQueueMap.put(null, new LinkedBlockingQueue<>());
@@ -239,18 +238,13 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private void awaitThreadPoolTermination(String executorName, ThreadPoolExecutor executorService) {
         try {
             while (!executorService.awaitTermination(300, TimeUnit.SECONDS)) {
-                final int[] queuedReads = {0, 0};
+                final int[] queuedReads = {0};
                 blockingQueueMap.values().forEach(queue -> {
                     queuedReads[0] += queue.size();
-                    queuedReads[1] += queue.remainingCapacity();
                 });
-
-                final int totalCapacity = queuedReads[0] + queuedReads[1];
-                final int totalUndefinedCapacity = blockingQueueMap.get(null).size() + blockingQueueMap.get(null).remainingCapacity();
-                log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d : Reads in queue - %d/%d : Reads in unidentified queue - %d/%d",
+                log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d : Reads in queue - %d : Reads in unidentified queue - %d",
                         executorName, executorService.getCompletedTaskCount(), executorService.getActiveCount(),
-                        executorService.getQueue().size(), queuedReads[0], totalCapacity,
-                        blockingQueueMap.get(null).size(), totalUndefinedCapacity));
+                        executorService.getQueue().size(), queuedReads[0], blockingQueueMap.get(null).size()));
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
@@ -269,6 +263,11 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         @Override
         public void run() {
+            if (this.barcode == null) {
+                //set higher priority for the undefined barcode thread since we expect the most reads
+                Thread.currentThread().setPriority(Thread.currentThread().getThreadGroup().getMaxPriority());
+            }
+
             final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
             try {
                 while (stillAdding) {
