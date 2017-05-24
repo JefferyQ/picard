@@ -277,7 +277,7 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                         writer.write(rec);
                         writeProgressLogger.record(null, 0);
                     } else {
-                        Thread.sleep(5000);
+                        Thread.sleep(100);
                     }
                 }
 
