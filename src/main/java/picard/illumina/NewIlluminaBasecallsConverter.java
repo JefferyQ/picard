@@ -28,12 +28,10 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingDeque;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -52,7 +50,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private final int minimumBaseQuality;
     private final MetricsFile<BarcodeMetric, Integer> metrics;
     private final File metricsFile;
-    private final Map<String, BlockingQueue<CLUSTER_OUTPUT_RECORD>> blockingQueueMap = new HashMap<>();
+    private final Map<String, ThreadPoolExecutorWithExceptions> barcodeWriterThreads = new HashMap<>();
+    private final Map<Integer, List<RecordWriter>> completedWork = new HashMap<>();
 
     /**
      * @param basecallsDir             Where to read basecalls from.
@@ -119,12 +118,8 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     pos += endIndex;
                 }
                 this.barcodesMetrics.put(barcode, new BarcodeMetric(null, null, barcode, bcStrings));
-                blockingQueueMap.put(barcode, new LinkedBlockingQueue<>());
-            } else {
-                //we expect a lot more unidentified reads so make a bigger queue
-                blockingQueueMap.put(null, new LinkedBlockingQueue<>());
             }
-
+            barcodeWriterThreads.put(barcode, new ThreadPoolExecutorWithExceptions(1));
         });
 
         File laneDir = new File(basecallsDir, IlluminaFileUtil.longLaneStr(lane));
@@ -187,34 +182,32 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
     @Override
     public void doTileProcessing() {
-        //spin up the writers
-        ThreadPoolExecutor writerExecutor = new ThreadPoolExecutorWithExceptions(barcodeRecordWriterMap.keySet().size());
-        List<RecordWriter> writers = new ArrayList<>();
-        for (String barcode : barcodeRecordWriterMap.keySet()) {
-            RecordWriter writer = new RecordWriter(barcode, blockingQueueMap.get(barcode));
-            writers.add(writer);
-            writerExecutor.submit(writer);
-        }
 
-        writerExecutor.shutdown();
+        ThreadPoolExecutor completedWorkExecutor = new ThreadPoolExecutorWithExceptions(1);
+
+        CompletedWorkChecker workChecker = new CompletedWorkChecker();
+        completedWorkExecutor.submit(workChecker);
+        completedWorkExecutor.shutdown();
 
         //thread by surface tile
-        ThreadPoolExecutor executorService = new ThreadPoolExecutorWithExceptions(numThreads);
+        ThreadPoolExecutor tileProcessingExecutor = new ThreadPoolExecutorWithExceptions(numThreads);
 
         for (Integer tile : tiles) {
-            executorService.submit(new TileProcessor(tile));
+            tileProcessingExecutor.submit(new TileProcessor(tile));
         }
 
-        executorService.shutdown();
+        tileProcessingExecutor.shutdown();
 
-        awaitThreadPoolTermination("Reading executor", executorService);
-        //we are done reading.. signal to the writers that we are not adding any more records to their BlockingQueue
+        awaitThreadPoolTermination("Reading executor", tileProcessingExecutor);
+        awaitThreadPoolTermination("Tile completion executor", completedWorkExecutor);
 
-        for (RecordWriter writer : writers) {
-            writer.signalDoneAdding();
-        }
+        barcodeWriterThreads.values().forEach(executor -> {
+            executor.shutdown();
+            awaitThreadPoolTermination("Barcode writer", executor);
+        });
 
-        awaitThreadPoolTermination("Writing executor", writerExecutor);
+        barcodeRecordWriterMap.values().forEach(ConvertedClusterDataWriter::close);
+
         if (metricsFile != null) {
             ExtractIlluminaBarcodes.finalizeMetrics(barcodesMetrics, noMatchMetric);
 
@@ -230,13 +223,9 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     private void awaitThreadPoolTermination(String executorName, ThreadPoolExecutor executorService) {
         try {
             while (!executorService.awaitTermination(300, TimeUnit.SECONDS)) {
-                final int[] queuedReads = {0};
-                blockingQueueMap.values().forEach(queue -> {
-                    queuedReads[0] += queue.size();
-                });
-                log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d : Reads in queue - %d : Reads in unidentified queue - %d",
+                log.info(String.format("%s waiting for job completion. Finished jobs - %d : Running jobs - %d : Queued jobs  - %d",
                         executorName, executorService.getCompletedTaskCount(), executorService.getActiveCount(),
-                        executorService.getQueue().size(), queuedReads[0], blockingQueueMap.get(null).size()));
+                        executorService.getQueue().size()));
             }
         } catch (InterruptedException e) {
             e.printStackTrace();
@@ -244,50 +233,33 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
     }
 
     private class RecordWriter implements Runnable {
+        private final SortingCollection<CLUSTER_OUTPUT_RECORD> recordCollection;
+        private final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer;
         private final String barcode;
-        private final BlockingQueue<CLUSTER_OUTPUT_RECORD> blockingQueue;
-        private boolean stillAdding = true;
 
-        private RecordWriter(String barcode, BlockingQueue<CLUSTER_OUTPUT_RECORD> blockingQueue) {
+        RecordWriter(ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer,
+                     SortingCollection<CLUSTER_OUTPUT_RECORD> recordCollection, String barcode) {
+            this.writer = writer;
+            this.recordCollection = recordCollection;
             this.barcode = barcode;
-            this.blockingQueue = blockingQueue;
         }
 
         @Override
         public void run() {
-
-            final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
-
-            while (stillAdding) {
-                CLUSTER_OUTPUT_RECORD record = null;
-                try {
-                    record = blockingQueue.poll(5, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                if (record != null) {
-                    writer.write(record);
-                    writeProgressLogger.record(null, 0);
-                }
-            }
-
-            CLUSTER_OUTPUT_RECORD record;
-            //we are done adding... now drain the queue
-            while ((record = blockingQueue.poll()) != null) {
+            for (CLUSTER_OUTPUT_RECORD record : recordCollection) {
                 writer.write(record);
                 writeProgressLogger.record(null, 0);
             }
-
-            writer.close();
         }
 
-        void signalDoneAdding() {
-            stillAdding = false;
+        public String getBarcode() {
+            return barcode;
         }
     }
 
     private class TileProcessor implements Runnable {
         private final int tileNum;
+        private final Map<String, SortingCollection<CLUSTER_OUTPUT_RECORD>> barcodeToRecordCollection = new HashMap<>();
 
         TileProcessor(int tileNum) {
             this.tileNum = tileNum;
@@ -307,14 +279,49 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
             dataProvider.close();
 
+            List<RecordWriter> writerList = new ArrayList<>();
+            barcodeToRecordCollection.forEach((barcode, value) -> {
+                value.doneAdding();
+                ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer = barcodeRecordWriterMap.get(barcode);
+                writerList.add(new RecordWriter(writer, value, barcode));
+
+            });
+            completedWork.put(tileNum, writerList);
+
             log.info("Finished processing tile " + tileNum);
         }
 
-        private void addRecord(final String barcode, final CLUSTER_OUTPUT_RECORD record) {
-            blockingQueueMap.get(barcode).add(record);
+        private synchronized void addRecord(final String barcode, final CLUSTER_OUTPUT_RECORD record) {
+            // Grab the existing collection, or initialize it if it doesn't yet exist
+            SortingCollection<CLUSTER_OUTPUT_RECORD> recordCollection = this.barcodeToRecordCollection.get(barcode);
+            if (recordCollection == null) {
+                // TODO: The implementation here for supporting ignoreUnexpectedBarcodes is not efficient,
+                // but the alternative is an extensive rewrite.  We are living with the inefficiency for
+                // this special case for the time being.
+                if (!barcodeRecordWriterMap.containsKey(barcode)) {
+                    if (ignoreUnexpectedBarcodes) {
+                        return;
+                    }
+                    throw new PicardException(String.format("Read records with barcode %s, but this barcode was not expected.  (Is it referenced in the parameters file?)", barcode));
+                }
+                recordCollection = newSortingCollection();
+                this.barcodeToRecordCollection.put(barcode, recordCollection);
+            }
+            recordCollection.add(record);
+        }
+
+        private synchronized SortingCollection<CLUSTER_OUTPUT_RECORD> newSortingCollection() {
+            final int maxRecordsInRam =
+                    Math.max(1, maxReadsInRamPerTile /
+                            barcodeRecordWriterMap.size());
+            return SortingCollection.newInstance(
+                    outputRecordClass,
+                    codecPrototype.clone(),
+                    outputRecordComparator,
+                    maxRecordsInRam,
+                    tmpDirs);
         }
     }
-
 
     private class ThreadPoolExecutorWithExceptions extends ThreadPoolExecutor {
         ThreadPoolExecutorWithExceptions(int threads) {
@@ -341,5 +348,30 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                 throw new PicardException(t.getMessage(), t);
             }
         }
+    }
+
+
+    private class CompletedWorkChecker implements Runnable {
+
+        private int currentTileIndex = 0;
+
+        @Override
+        public void run() {
+            while (currentTileIndex < tiles.size()) {
+                Integer currentTile = tiles.get(currentTileIndex);
+                if (completedWork.containsKey(currentTile)) {
+                    log.info("Writing out tile " + currentTile);
+                    completedWork.get(currentTile).forEach(writer -> barcodeWriterThreads.get(writer.getBarcode()).submit(writer));
+                    currentTileIndex++;
+                } else {
+                    try {
+                        Thread.sleep(5000);
+                    } catch (InterruptedException e) {
+                        throw new PicardException(e.getMessage(), e);
+                    }
+                }
+            }
+        }
+
     }
 }
