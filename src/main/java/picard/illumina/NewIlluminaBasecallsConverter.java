@@ -206,8 +206,6 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
             awaitThreadPoolTermination("Barcode writer", executor);
         });
 
-        barcodeRecordWriterMap.values().forEach(ConvertedClusterDataWriter::close);
-
         if (metricsFile != null) {
             ExtractIlluminaBarcodes.finalizeMetrics(barcodesMetrics, noMatchMetric);
 
@@ -254,6 +252,22 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
 
         public String getBarcode() {
             return barcode;
+        }
+    }
+
+    private class Closer implements Runnable {
+        private final ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer;
+        private final String barcode;
+
+        private Closer(ConvertedClusterDataWriter<CLUSTER_OUTPUT_RECORD> writer, String barcode) {
+            this.writer = writer;
+            this.barcode = barcode;
+        }
+
+        @Override
+        public void run() {
+            log.info("Closing writer for barcode " + barcode);
+            this.writer.close();
         }
     }
 
@@ -371,6 +385,9 @@ public class NewIlluminaBasecallsConverter<CLUSTER_OUTPUT_RECORD> extends Baseca
                     }
                 }
             }
+
+            //we are all done scheduling work.. now schedule the closes
+            barcodeRecordWriterMap.forEach((barcode, writer) -> barcodeWriterThreads.get(barcode).submit(new Closer(writer, barcode)));
         }
 
     }
