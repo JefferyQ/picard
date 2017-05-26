@@ -201,7 +201,19 @@ public class ValidateSamFile extends CommandLineProgram {
         }
         out.flush();
 
-        return result ? 0 : 1;
+        if ( result ) {
+            return 0;  // no warnings or errors
+        } else {
+            if (validator.getNumErrors() == 0) {
+                if (validator.getNumWarnings() > 0) {
+                    return 2;   // warnings but no errors
+                }
+            } else {
+                return 1;   // errors
+            }
+        }
+
+        return -1;
     }
 
     @Override
